@@ -1,6 +1,6 @@
 // management.go implements the QoderWork management API and web panel:
 // account dashboard (nickname, credits, plan, check-in streak), manual/auto
-// check-in (daily at 09:00 and 21:00 local time), and quota refresh.
+// check-in (10:05 Asia/Shanghai, plus local 10:00 / 15:00 / 21:00), and quota refresh.
 package main
 
 import (
@@ -32,7 +32,10 @@ type creditsSummary struct {
 	TotalRemain int64 `json:"total_remain"`
 	// TotalUsed is consumed credits in the current cycle (sum of packages).
 	TotalUsed int64 `json:"total_used"`
-	// TotalSize is the credit capacity/pool (sum of package sizes). remain+used ≈ size.
+	// TotalSize is the sum of upstream pool totals (user quota, add-on,
+	// dedicated packages, org shared pool). A pool can report remaining
+	// credits with total 0; TotalSize stays 0 in that case. displayNote
+	// prints 池 only when TotalSize > 0. remain+used is a different sum.
 	TotalSize int64 `json:"total_size"`
 	// PackCount is number of resource packages included in the aggregate.
 	PackCount int `json:"pack_count"`
