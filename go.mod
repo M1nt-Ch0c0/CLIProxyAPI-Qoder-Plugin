@@ -1,4 +1,4 @@
-module github.com/mmqz/cpa-multi-plugins/plugins/qoder
+module github.com/M1nt-Ch0c0/CLIProxyAPI-Qoder-Plugin
 
 go 1.26.0
 

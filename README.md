@@ -2,9 +2,9 @@
 
 A [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) provider plugin for the Qoder family. CN and Intl share one plugin and one default identifier, `qoder`. Each auth file records its own region. `login_region` applies only to new logins: `cn` (default) uses `https://qoder.cn`, `intl` uses `https://qoder.com`. Legacy `qoder-cn-<uid>.json` and `qoder-intl-<uid>.json` files are adopted on startup.
 
-The source directory is `plugins/qoder`. Names `qoder-cn` and `qoder-intl` in the repository README and in [docs/PROTOCOL.md](../../docs/PROTOCOL.md) are the host-level protocol notes. A split-channel build can still register under those ids (`-X main.providerName=qoder-cn` or `qoder-intl`). Install that package in place of the unified plugin.
+This repository is the Qoder plugin by itself. Names `qoder-cn` and `qoder-intl` are split-channel ids. A split build can still register under those ids (`-X main.providerName=qoder-cn` or `qoder-intl`). Install that package in place of the unified plugin.
 
-Built with Go (CGO, c-shared). The component version is `plugins/qoder/VERSION` (0.8.73 in this tree). Repository tags, `make` injecting `git describe`, and a local stamp such as `0.8.87-local.<sha>` are a different series. See [Which number is which](../../README.md#which-number-is-which) in the root README.
+Built with Go (CGO, c-shared). The component version is `VERSION` (0.8.73 in this tree). `make` injects `git describe --tags --always --dirty`, so a local binary can report a tag plus a commit distance instead of the VERSION file. A hand stamp such as `0.8.87-local.<sha>` is that kind of local build, not the VERSION file.
 
 CN API hosts are `openapi.qoder.com.cn` and `gateway.qoder.com.cn`. The older qoderwork IDE host `qoder.com.cn` is the login domain this plugin stopped using at component 0.8.45.
 

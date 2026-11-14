@@ -371,7 +371,7 @@ func wbRegistration() registration {
 			Name:             providerName,
 			Version:          version,
 			Author:           "Sliverkiss (based on qoderwork by lovingfish)",
-			GitHubRepository: "https://github.com/mmqz/cpa-multi-plugins",
+			GitHubRepository: "https://github.com/M1nt-Ch0c0/CLIProxyAPI-Qoder-Plugin",
 			Logo:             pluginLogoURL,
 			ConfigFields: []pluginapi.ConfigField{
 				{Name: "queue_wait_budget", Type: pluginapi.ConfigFieldTypeString, Description: "Cumulative queue-ticket wait per execution, 0–150 integer seconds (default 150). 0 disables queue retries. Does not limit network or generation time."},
