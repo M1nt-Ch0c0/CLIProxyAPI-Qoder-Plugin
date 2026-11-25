@@ -214,6 +214,11 @@ type openAIRequest struct {
 	ReasoningEffort string `json:"reasoning_effort"`
 	// Tools is the client's OpenAI tools array, forwarded verbatim when present.
 	Tools json.RawMessage `json:"tools,omitempty"`
+	// Sampling dials forwarded verbatim on the completions path when set.
+	MaxTokens   int             `json:"max_tokens,omitempty"`
+	Temperature *float64        `json:"temperature,omitempty"`
+	TopP        *float64        `json:"top_p,omitempty"`
+	Stop        json.RawMessage `json:"stop,omitempty"`
 }
 
 // extractLatestUserPrompt returns the textual content of the last user

@@ -48,14 +48,15 @@ func TestQoderUnwrapFrame_PayloadAndControl(t *testing.T) {
 	}
 }
 
-// TestCollectUpstreamStreamQoder_EmptyStreamRejected pins the v0.8.17 guard:
+// TestCollectUpstreamStreamEmptyStreamRejected pins the v0.8.17 guard:
 // keep-alives + [DONE] with zero payload chunks must fail, not aggregate into
 // an empty-but-successful completion.
-func TestCollectUpstreamStreamQoder_EmptyStreamRejected(t *testing.T) {
-	// collectUpstreamStreamQoder builds its own HTTP call; exercise the guard
+func TestCollectUpstreamStreamEmptyStreamRejected(t *testing.T) {
+	// The synchronous collector builds its own HTTP call; exercise the guard
 	// semantics through qoderUnwrapFrame + the documented pump contract by
 	// verifying a payload-bearing envelope passes and a control-only stream
-	// yields zero meaningful frames.
+	// yields zero meaningful frames. (The completions decoder's own guard
+	// contract is pinned in completions_test.go.)
 	envelope := `data: {"statusCodeValue":200,"body":"{\"choices\":[{\"delta\":{\"content\":\"x\"}}]}"}`
 	if _, meaningful, err := qoderUnwrapFrame(envelope); err != nil || !meaningful {
 		t.Fatalf("payload envelope must be meaningful: err=%v meaningful=%v", err, meaningful)

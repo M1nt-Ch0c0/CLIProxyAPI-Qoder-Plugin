@@ -8,6 +8,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -320,14 +321,19 @@ func streamChunkAnswers(chunk string) bool {
 // default, stream_head_timeout 0 — keeps the historical behavior byte for byte.
 //
 // v0.8.64 queue retry: rebuild re-issues the upstream request (fresh body
-// reader + re-signed cosy headers) for the 10605 RESOURCE_LIMIT ticket, which
+// reader + freshly minted headers) for the 10605 RESOURCE_LIMIT ticket, which
 // the gateway hands back asking the client to return after retryAfterSeconds.
 // A ticket can arrive either as the HTTP status or as the first SSE frame;
 // both are recognised before anything was delivered to the client, so the
 // retry is invisible to the consumer. The gate keeps waiting across rounds —
 // its one-shot verdict slot is still untouched by a queue ticket, so the
 // eventual round reports through exactly the same paths as before.
-func pumpUpstreamStream(httpReq *http.Request, rebuild func() (*http.Request, error), cancel context.CancelFunc, streamID string, sseFramed bool, requestedModel, upstreamModel, authUID string, started time.Time, authID, cooldownModel string, gate *streamHeadGate) {
+//
+// unwrap is the dialect's frame decoder (v0.8.76): the completions chat path
+// passes completionsUnwrapFrame (plain OpenAI SSE), the legacy envelope
+// dialect qoderUnwrapFrame. Everything else — gate, queue retry, empty-stream
+// and truncation guards, cooldown bookkeeping — is dialect-neutral.
+func pumpUpstreamStream(httpReq *http.Request, rebuild func() (*http.Request, error), cancel context.CancelFunc, streamID string, sseFramed bool, unwrap func(string) (string, bool, error), requestedModel, upstreamModel, authUID string, started time.Time, authID, cooldownModel string, gate *streamHeadGate) {
 	// Always close the host stream exactly once on every exit path.
 	closed := false
 	closeOnce := func() {
@@ -451,7 +457,7 @@ func pumpUpstreamStream(httpReq *http.Request, rebuild func() (*http.Request, er
 			sawFinish := false
 			sawTerminator := false
 			for scanner.Scan() {
-				bodyStr, meaningful, frameErr := qoderUnwrapFrame(scanner.Text())
+				bodyStr, meaningful, frameErr := unwrap(scanner.Text())
 				if frameErr != nil {
 					// v0.8.64: a queue ticket that rode a 200-OK envelope frame. Only
 					// retry while nothing was delivered: the ticket is a first-frame
@@ -545,8 +551,8 @@ func pumpUpstreamStream(httpReq *http.Request, rebuild func() (*http.Request, er
 				return queueSignal{}, false
 			}
 			// v0.8.18: the async pump finally gets the same empty-stream guard the
-			// synchronous collector has had since v0.8.17 — a 200 envelope stream
-			// with zero payload is an upstream failure, not a silent success. (The
+			// synchronous collector has had since v0.8.17 — a 200 stream with
+			// zero payload is an upstream failure, not a silent success. (The
 			// seenPayload tracking used to be dead code here.) Same lifecycle reasoning
 			// as above: no hand-off abort, the message stays in-band.
 			if !seenPayload {
@@ -597,27 +603,25 @@ func pumpUpstreamStream(httpReq *http.Request, rebuild func() (*http.Request, er
 	}
 }
 
-// collectUpstreamStreamQoder is the QoderWork-flavoured synchronous fallback
-// (no async stream id): drain the upstream nested SSE, unwrap the inner
-// OpenAI chunks, return them as a slice. The collector, when non-nil,
-// observes the unwrapped inner chunks for usage extraction.
+// collectUpstreamStreamCompletions is the synchronous fallback for the
+// completions chat path (no async stream id): drain the plain OpenAI SSE
+// reply and return the chunks as a slice. The collector, when non-nil,
+// observes the chunks for usage extraction.
 //
-// v0.8.64: honours the 10605 RESOURCE_LIMIT queue ticket the same way the
-// async pump does — wait retryAfterSeconds and re-issue (the loop below),
-// bounded by queueRetryAllowed. The synchronous path has no request context,
-// so the wait is unconditional; nothing was collected yet on a ticket round,
-// which makes the restart safe.
-func collectUpstreamStreamQoder(encodedBody string, sa *storedAuth, modelKey string, sseFramed bool, collector *sseUsageCollector) ([]pluginapi.ExecutorStreamChunk, int, error) {
+// v0.8.64 queue machinery (unchanged): honours the 10605 RESOURCE_LIMIT queue
+// ticket the same way the async pump does — wait retryAfterSeconds and
+// re-issue (the loop below), bounded by queueRetryAllowed. The synchronous
+// path has no request context, so the wait is unconditional; nothing was
+// collected yet on a ticket round, which makes the restart safe.
+func collectUpstreamStreamCompletions(body []byte, sa *storedAuth, sseFramed bool, collector *sseUsageCollector) ([]pluginapi.ExecutorStreamChunk, int, error) {
 	var waited time.Duration
 	attempt := 0
 	for {
-		httpReq, err := http.NewRequest(http.MethodPost, endpointChatFor(sa), strings.NewReader(encodedBody))
+		httpReq, err := http.NewRequest(http.MethodPost, endpointCompletionsFn(sa), bytes.NewReader(body))
 		if err != nil {
 			return nil, 0, err
 		}
-		if err := applyCosyHeaders(httpReq, sa, encodedBody, endpointChatFor(sa), modelKey, true); err != nil {
-			return nil, 0, fmt.Errorf("cosy: %w", err)
-		}
+		applyCompletionsHeaders(httpReq, sa)
 		stream, statusCode, _, err := hostHTTPDoStream(httpReq)
 		if err != nil {
 			return nil, 0, fmt.Errorf("http_error: %w", err)
@@ -650,7 +654,7 @@ func collectUpstreamStreamQoder(encodedBody string, sa *storedAuth, modelKey str
 		sawTerminator := false
 		var frameTerminal error
 		for scanner.Scan() {
-			bodyStr, meaningful, frameErr := qoderUnwrapFrame(scanner.Text())
+			bodyStr, meaningful, frameErr := completionsUnwrapFrame(scanner.Text())
 			if frameErr != nil {
 				frameTerminal = frameErr
 				break
@@ -698,8 +702,8 @@ func collectUpstreamStreamQoder(encodedBody string, sa *storedAuth, modelKey str
 		if err := scanner.Err(); err != nil {
 			return chunks, 0, upstreamReadError(err)
 		}
-		// v0.8.17 empty-stream guard: a 200 envelope stream with zero payload
-		// chunks is an upstream failure, not a silent success.
+		// v0.8.17 empty-stream guard: a 200 stream with zero payload chunks
+		// is an upstream failure, not a silent success.
 		if !seenPayload {
 			return chunks, 0, emptyStreamError()
 		}
@@ -993,20 +997,28 @@ func aggregateCompletion(r io.Reader, model string) ([]byte, error) {
 // ({"firstTokenDuration":N,"totalDuration":N,"serverDuration":N}), which
 // qoderUnwrapFrame swallows as a control line.
 func aggregateQoderSSE(r io.Reader, model string) ([]byte, error) {
-	// Unwrap the nested SSE into an inner plain-text stream of OpenAI chunks,
+	return aggregateUnwrappedSSE(r, model, qoderUnwrapFrame)
+}
+
+// aggregateUnwrappedSSE is the dialect-neutral fold: run every SSE line
+// through the caller's frame decoder, then aggregate the surviving chunks
+// with aggregateCompletion. The decoder owns the dialect (legacy envelope
+// unwrap vs plain completions SSE); the guards below are shared.
+func aggregateUnwrappedSSE(r io.Reader, model string, unwrap func(string) (string, bool, error)) ([]byte, error) {
+	// Unwrap the SSE into an inner plain-text stream of OpenAI chunks,
 	// then delegate to aggregateCompletion. We materialise the inner stream
-	// into memory because the gateway's SSE is short-lived (one chat call)
+	// into memory because the upstream SSE is short-lived (one chat call)
 	// and the inner stream is at most a few hundred KB.
 	var inner strings.Builder
 	seenPayload := false
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
-		// v0.12.76: route every line through qoderUnwrapFrame so a 200-OK
-		// error envelope (statusCodeValue>=400 / body carrying {"error":...})
-		// surfaces as an error instead of being folded into a synthetic
-		// empty completion — the two streaming paths already do this.
-		bodyStr, meaningful, frameErr := qoderUnwrapFrame(scanner.Text())
+		// v0.12.76: route every line through the frame decoder so a 200-OK
+		// error frame (envelope statusCodeValue>=400 / body carrying
+		// {"error":...}) surfaces as an error instead of being folded into a
+		// synthetic empty completion — the two streaming paths already do this.
+		bodyStr, meaningful, frameErr := unwrap(scanner.Text())
 		if frameErr != nil {
 			return nil, frameErr
 		}

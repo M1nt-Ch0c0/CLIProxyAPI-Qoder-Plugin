@@ -517,7 +517,7 @@ func TestPumpQueueExhaustionCoolsPairWhenAuthKnown(t *testing.T) {
 		defer close(done)
 		pumpUpstreamStream(req, func() (*http.Request, error) {
 			return http.NewRequest(http.MethodPost, srv.URL, strings.NewReader("encoded-body"))
-		}, nil, "queue-exhaust", false, "qmodel_preview", "qmodel_preview", "", time.Now(), "qex-auth", "qfmodel", nil)
+		}, nil, "queue-exhaust", false, qoderUnwrapFrame, "qmodel_preview", "qmodel_preview", "", time.Now(), "qex-auth", "qfmodel", nil)
 	}()
 	rec.waitFor(t, 1)
 	mustFinish(t, done)
@@ -611,10 +611,12 @@ func TestPumpNonQueueFailureStillFailsImmediately(t *testing.T) {
 // --- the synchronous collector (unit level) -----------------------------------
 
 func TestCollectQueueTicketRetryPolicyIntegration(t *testing.T) {
-	// collectUpstreamStreamQoder dials endpointChatFor (a real upstream host),
-	// so the HTTP leg cannot run hermetically. What CAN run hermetically is
-	// the decision table its loop consumes: a detected ticket within budget
-	// retries, an exhausted one fails with the rendered line.
+	// The synchronous collector (collectUpstreamStreamCompletions since
+	// v0.8.76) shares this decision table with the pump. Its HTTP leg is
+	// covered hermetically in completions_test.go via endpointCompletionsFn;
+	// what is pinned here is the budget arithmetic its loop consumes: a
+	// detected ticket within budget retries, an exhausted one fails with the
+	// rendered line.
 	waits := installFastQueueWait(t)
 
 	// Budget arithmetic the collector loop performs: three waits, then stop.

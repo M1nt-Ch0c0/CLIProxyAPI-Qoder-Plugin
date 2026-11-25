@@ -1,5 +1,68 @@
 # Changelog
 
+## 0.8.76
+
+### Chat rides the client's completions endpoint with a top-level model
+
+0.8.74 fixed the catalog/alias half of the "requested model comes back as
+auto" report; this fixes the transport half. The plugin still sent the
+legacy `agent_chat_generation` envelope, where the model key only rode
+`model_config.key` / `chat_context.extra.modelConfig.key`. The current
+Qoder service no longer reads that field — a request without a top-level
+`model` is answered by `auto`, so the panel compared the sent
+`gmodel_latest` against a returned `auto` and flagged "model mismatch".
+The old endpoint still answers, which is why requests kept succeeding
+while the requested model silently did not apply.
+
+Both chat paths (executor.execute and executor.execute_stream, sync and
+async) now speak the dialect the clients themselves use, verified against
+each region's own worker:
+
+- Intl (qodercli 1.1.66, `P5A()`/`Jgc`): POST
+  `https://api2-v2.qoder.sh/model/v1/chat/completions`.
+- CN (qoderclicn 1.1.97, `J8A`/`tct`; that build has no
+  `agent_chat_generation` left at all): POST
+  `https://gateway.qoder.com.cn/qsvr/chat/completions`.
+
+The body is plain JSON (no QoderEncoding) shaped like the client builders
+(Intl `Qcn` / CN `fni`): top-level `model` (the real catalog key from
+`cpaToUpstreamKey`), verbatim `messages`, forced `stream: true` with
+`stream_options.include_usage`, and `tools` / `stop` / `max_tokens` /
+`temperature` / `top_p` / `reasoning_effort` forwarded when the caller set
+them. Headers are `Authorization: Bearer <access token>`,
+`Accept: text/event-stream`, `Content-Type: application/json`, and fresh
+`X-Request-ID` / `X-Session-ID` per round — no COSY signature and no
+machine headers on this path, exactly as the clients do it. The signing
+code itself is untouched and still serves the legacy gateway APIs; the
+model/list signing rule is unchanged.
+
+The reply is ordinary OpenAI SSE, so the existing data plane consumes it
+with the dialect hook swapped, not rewritten: `pumpUpstreamStream` takes
+the frame decoder as a parameter (the completions path passes
+`completionsUnwrapFrame`, the legacy envelope decoder stays for the live
+probes and the machinery tests), and the synchronous collector is now
+`collectUpstreamStreamCompletions`. Every guard rides along unchanged:
+head gate, empty-stream and truncation witnesses, the 10605 queue-ticket
+retry at the HTTP layer and in error frames, cooldown bookkeeping, usage
+collection. `completionsUnwrapFrame` keeps the same guard contract for
+the plain dialect — an `{"error":...}` object on the data channel fails
+the stream (a ticket riding it still retries), and an object with neither
+`choices` nor `usage` is swallowed as metadata, so a metadata-only stream
+still trips the empty-stream guard. The non-stream fold is
+`aggregateCompletionsSSE` (shared `aggregateUnwrappedSSE` core with
+`aggregateQoderSSE`), so a 200 error frame can no longer fold into a
+synthetic empty success on the execute path either.
+
+Tests: `completions_test.go` pins the body/endpoint/header contract per
+region, the decoder guards, and — through the real handlers against an
+httptest upstream via the `endpointCompletionsFn` seam — the field-report
+regression: a request for `glm-5.4` leaves as top-level `gmodel_latest`
+and the folded completion carries `gmodel_latest`, not `auto`; plus the
+sync/async stream paths, error-frame rejection, and the queue retry on
+the new dialect. The pump/gate/queue machinery tests keep their envelope
+fixtures by passing `qoderUnwrapFrame` explicitly.
+
+
 ## 0.8.75
 
 ### Login success no longer double-registers the auth file

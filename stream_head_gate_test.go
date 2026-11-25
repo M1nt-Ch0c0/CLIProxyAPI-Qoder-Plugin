@@ -169,7 +169,9 @@ func newQoderSSEServer(t *testing.T, status int, body string) *httptest.Server {
 // runPump drives the real async pump against url. gate == nil is the disabled
 // configuration (stream_head_timeout: 0). rebuild re-issues the request for
 // v0.8.64 queue-ticket retries (nil disables retry — none of the gate tests
-// exercise a queue ticket).
+// exercise a queue ticket). The fixtures below are legacy envelope frames, so
+// the pump runs with qoderUnwrapFrame; the gate/queue machinery it exercises
+// is the same one the completions path uses with completionsUnwrapFrame.
 func runPump(url string, gate *streamHeadGate) {
 	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader("encoded-body"))
 	if err != nil {
@@ -177,7 +179,7 @@ func runPump(url string, gate *streamHeadGate) {
 	}
 	pumpUpstreamStream(req, func() (*http.Request, error) {
 		return http.NewRequest(http.MethodPost, url, strings.NewReader("encoded-body"))
-	}, nil, "stream-head-gate", false,
+	}, nil, "stream-head-gate", false, qoderUnwrapFrame,
 		"qmodel_preview", "qmodel_preview", "", time.Now(), "", "", gate)
 }
 
@@ -378,7 +380,7 @@ func TestFrameErrorStaysStatusLessOutsideGate(t *testing.T) {
 	if got := headGateStatus(frameGateStatus(errAggregate)); got != http.StatusTooManyRequests {
 		t.Fatalf("headGateStatus(frameGateStatus(err)) = %d, want 429", got)
 	}
-	// collectUpstreamStreamQoder surfaces the same error type on its frame path;
+	// The synchronous collector surfaces the same error type on its frame path;
 	// the wrapper the head gate returns is the only place a status is attached.
 	var frameErr *qoderFrameError
 	if !errors.As(errAggregate, &frameErr) {

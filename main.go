@@ -1,9 +1,10 @@
 // Package main implements the qoderwork CLIProxyAPI dynamic plugin.
 //
 // qoderwork wraps the QoderWork CN (qoder.com.cn) OpenAPI as a cliproxy
-// provider: it exchanges a PAT for a jobToken, refreshes it, signs inference
-// requests with COSY, and exposes the standard chat-completions interface.
-// upstream /v2/chat/completions endpoint.
+// provider: it exchanges a PAT for a jobToken, refreshes it, and exposes the
+// standard chat-completions interface. Chat rides the current client dialect
+// (v0.8.76): an OpenAI-style POST with a top-level model key and Bearer auth
+// (completions.go); COSY signing remains for the legacy gateway APIs.
 //
 // This file is a clean-room reimplementation reconstructed from the public
 // qoderwork.so binary (symbol table, string constants and RPC shape) published
@@ -58,6 +59,7 @@ extern void cliproxyPluginShutdown(void);
 import "C"
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -363,7 +365,7 @@ type registrationCapability struct {
 }
 
 // version is injected at build time via -ldflags "-X main.version=...".
-var version = "0.8.75"
+var version = "0.8.76"
 
 // providerName is a VAR (split flavor, issue #29): the unified build keeps
 // the default "qoder"; the split-channel builds rename it via
@@ -780,36 +782,33 @@ func handleExecExecute(raw []byte) ([]byte, error) {
 	if sa.Account.UID != "" {
 		authUID = sa.Account.UID
 	}
-	// Build the QoderWork agent_chat_generation body from the OpenAI request,
-	// then QoderEncoding-encode it. The template embeds a 10657-token system
-	// prompt that the server requires for normal behaviour (KNOWLEDGE §5.2).
+	// v0.8.76: build the OpenAI-style completions body with the model key at
+	// the TOP LEVEL (see completions.go). The legacy agent_chat_generation
+	// envelope only carried model_config.key, which the service no longer
+	// reads — requests without a top-level model are answered by auto.
 	qwReq := &openAIRequest{}
 	if err := json.Unmarshal(req.Payload, qwReq); err != nil && len(req.Payload) > 0 {
 		publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, 0, "payload parse: "+err.Error())
 		return nil, fmt.Errorf("payload parse: %w", err)
 	}
-	body, err := buildQoderBody(qwReq, upstreamModel, uiUserType(nil))
+	body, err := buildCompletionsBody(qwReq, upstreamModel)
 	if err != nil {
 		publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, 0, "body build: "+err.Error())
 		return nil, fmt.Errorf("body build: %w", err)
 	}
-	encodedBody := qoderEncode(body)
 	// v0.8.64: honour the 10605 RESOURCE_LIMIT queue ticket — wait
 	// retryAfterSeconds and re-issue the request, bounded by
 	// queueRetryAllowed (see queue_retry.go). The ticket can arrive as the
-	// HTTP status or inside the SSE envelope as its first frame; both are
+	// HTTP status or inside the SSE stream as its first frame; both are
 	// recognised before anything is returned to the host, so the retry is
 	// invisible to the caller.
 	var queueWaited time.Duration
 	for attempt := 0; ; attempt++ {
-		httpReq, err := http.NewRequest(http.MethodPost, endpointChatFor(sa), strings.NewReader(encodedBody))
+		httpReq, err := http.NewRequest(http.MethodPost, endpointCompletionsFn(sa), bytes.NewReader(body))
 		if err != nil {
 			return nil, err
 		}
-		if err := applyCosyHeaders(httpReq, sa, encodedBody, endpointChatFor(sa), upstreamModel, true); err != nil {
-			publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, 0, "cosy: "+err.Error())
-			return nil, fmt.Errorf("cosy: %w", err)
-		}
+		applyCompletionsHeaders(httpReq, sa)
 		// Compliance: route via host.http.do_stream so request-log captures the
 		// outbound call. Read entire body via the bridge, then fold SSE → completion.
 		stream, statusCode, _, err := hostHTTPDoStream(httpReq)
@@ -844,7 +843,7 @@ func handleExecExecute(raw []byte) ([]byte, error) {
 			// cooldown layer stops re-picking a drained credential.
 			return nil, upstreamStatusError(statusCode, errOut)
 		}
-		completion, err := aggregateQoderSSE(newHostStreamReader(stream), req.Model)
+		completion, err := aggregateCompletionsSSE(newHostStreamReader(stream), req.Model)
 		stream.Close()
 		if err != nil {
 			var fe *qoderFrameError
@@ -903,7 +902,7 @@ func handleExecStream(raw []byte) ([]byte, error) {
 		authUID = sa.Account.UID
 	}
 
-	// Build the QoderWork body (template-based) and QoderEncoding-encode.
+	// v0.8.76: OpenAI-style completions body, top-level model (completions.go).
 	bodyRaw := req.Payload
 	if len(bodyRaw) == 0 {
 		bodyRaw = req.OriginalRequest
@@ -913,12 +912,11 @@ func handleExecStream(raw []byte) ([]byte, error) {
 		publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, 0, "payload parse: "+err.Error())
 		return nil, fmt.Errorf("payload parse: %w", err)
 	}
-	body, err := buildQoderBody(qwReq, upstreamModel, uiUserType(nil))
+	body, err := buildCompletionsBody(qwReq, upstreamModel)
 	if err != nil {
 		publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, 0, "body build: "+err.Error())
 		return nil, fmt.Errorf("body build: %w", err)
 	}
-	encodedBody := qoderEncode(body)
 
 	headers := streamHeaders()
 	sseFramed := clientNeedsSSEFrame(req.Metadata)
@@ -926,7 +924,7 @@ func handleExecStream(raw []byte) ([]byte, error) {
 	// No async stream id → fall back to synchronous chunk collection.
 	if req.StreamID == "" {
 		collector := &sseUsageCollector{}
-		chunks, statusCode, errCollect := collectUpstreamStreamQoder(encodedBody, sa, upstreamModel, sseFramed, collector)
+		chunks, statusCode, errCollect := collectUpstreamStreamCompletions(body, sa, sseFramed, collector)
 		if errCollect != nil {
 			publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, statusCode, errCollect.Error())
 			recordUpstreamFailure(req.AuthID, cooldownModel, statusCode, errCollect.Error())
@@ -944,31 +942,25 @@ func handleExecStream(raw []byte) ([]byte, error) {
 	// sharedHTTPClient's 120s timeout, holding a pool slot the whole time.
 	ctx, cancel := context.WithCancel(context.Background())
 	// v0.8.64: rebuildQueueRequest re-issues the upstream request for a 10605
-	// queue-ticket retry — the body reader is single-shot and the cosy signature
-	// is timestamped, so every round needs a freshly minted request.
+	// queue-ticket retry — the body reader is single-shot and the completions
+	// headers carry per-round request ids, so every round needs a freshly
+	// minted request.
 	rebuildQueueRequest := func() (*http.Request, error) {
-		retryReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointChatFor(sa), strings.NewReader(encodedBody))
+		retryReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointCompletionsFn(sa), bytes.NewReader(body))
 		if err != nil {
 			return nil, err
 		}
-		if err := applyCosyHeaders(retryReq, sa, encodedBody, endpointChatFor(sa), upstreamModel, true); err != nil {
-			return nil, err
-		}
+		applyCompletionsHeaders(retryReq, sa)
 		return retryReq, nil
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointChatFor(sa), strings.NewReader(encodedBody))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointCompletionsFn(sa), bytes.NewReader(body))
 	if err != nil {
 		cancel()
 		streamEmitError(req.StreamID, err.Error())
 		streamClose(req.StreamID)
 		return okEnvelope(streamResponse{Headers: headers})
 	}
-	if err := applyCosyHeaders(httpReq, sa, encodedBody, endpointChatFor(sa), upstreamModel, true); err != nil {
-		cancel()
-		streamEmitError(req.StreamID, "cosy: "+err.Error())
-		streamClose(req.StreamID)
-		return okEnvelope(streamResponse{Headers: headers})
-	}
+	applyCompletionsHeaders(httpReq, sa)
 	// v0.12.85 opt-in stream head gate (config `stream_head_timeout`, seconds).
 	// The pump reads the opening frames while the hand-off waits for its
 	// verdict, so a failure that lands before the model starts answering still
@@ -977,7 +969,7 @@ func handleExecStream(raw []byte) ([]byte, error) {
 	// hand-off: the pump owns the verdict channel and never blocks on us.
 	headTimeout := streamHeadTimeout()
 	gate := newStreamHeadGate(headTimeout)
-	go pumpUpstreamStream(httpReq, rebuildQueueRequest, cancel, req.StreamID, sseFramed, req.Model, upstreamModel, authUID, started, req.AuthID, cooldownModel, gate)
+	go pumpUpstreamStream(httpReq, rebuildQueueRequest, cancel, req.StreamID, sseFramed, completionsUnwrapFrame, req.Model, upstreamModel, authUID, started, req.AuthID, cooldownModel, gate)
 	if verdict, decided := gate.awaitHandoff(headTimeout); decided && verdict.err != nil {
 		// Nothing was delivered, so the host can rotate/cool on a real status
 		// instead of accepting a successful-looking empty answer. The status is
