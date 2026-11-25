@@ -4,17 +4,18 @@
 // a request without a top-level model is answered by auto (field report
 // 2026-11-25: panel "model mismatch", sent gmodel_latest / received auto).
 //
-// Hosts and paths verified against the clients themselves:
-//   - Intl qodercli 1.1.66 worker: P5A() = https://api2-v2.qoder.sh (prod entry
-//     of QODER_MODEL_SERVER_HOST) + /model/v1/chat/completions.
-//   - CN qoderclicn 1.1.97 worker: gatewayBaseUrl (gateway.qoder.com.cn/qsvr)
-//     + /chat/completions; that build has no agent_chat_generation left at all.
+// The chat route is /qsvr/chat/completions on the same inference gateway the
+// rest of the plugin already uses (api3.qoder.sh for intl, gateway.qoder.com.cn
+// for cn). An unauthenticated POST there returns 401 TOKEN_INVALID /
+// "missing authorization token", which is the bearer this file attaches.
 //
-// Both send plain JSON (no QoderEncoding), Authorization: Bearer <access
-// token>, Accept: text/event-stream, and stream_options.include_usage; the
-// reply is ordinary OpenAI SSE, so aggregateCompletion / the streaming pump
-// consume it without envelope unwrapping. No COSY signature on this path —
-// exactly as the clients do it; the signing code itself is untouched.
+// api2-v2.qoder.sh does not resolve, and /model/v1/chat/completions is 404 on
+// api1, api2, api3 and the CN gateway. Sending intl chat there hangs until
+// the HTTP client's context deadline.
+//
+// The body is plain JSON (no QoderEncoding): top-level model, Bearer access
+// token, Accept: text/event-stream, stream_options.include_usage. The reply
+// is ordinary OpenAI SSE. No COSY signature on this path.
 package qoder
 
 import (
@@ -27,13 +28,8 @@ import (
 	"github.com/google/uuid"
 )
 
-const modelServerBaseIntl = "https://api2-v2.qoder.sh"
-
 func endpointCompletionsFor(sa *storedAuth) string {
-	if authRegion(sa) == regionIntl {
-		return modelServerBaseIntl + "/model/v1/chat/completions"
-	}
-	return gatewayBaseCN + "/qsvr/chat/completions"
+	return gatewayBaseFor(sa) + "/qsvr/chat/completions"
 }
 
 // endpointCompletionsFn is the test seam for the chat URL (httptest servers).

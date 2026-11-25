@@ -172,10 +172,10 @@ func TestEndpointCompletionsPerRegion(t *testing.T) {
 		sa   *storedAuth
 		want string
 	}{
-		{"intl explicit", &storedAuth{Auth: storedTokens{Region: "intl"}}, "https://api2-v2.qoder.sh/model/v1/chat/completions"},
+		{"intl explicit", &storedAuth{Auth: storedTokens{Region: "intl"}}, "https://api3.qoder.sh/qsvr/chat/completions"},
 		{"cn explicit", &storedAuth{Auth: storedTokens{Region: "cn"}}, "https://gateway.qoder.com.cn/qsvr/chat/completions"},
 		{"cn default", &storedAuth{}, "https://gateway.qoder.com.cn/qsvr/chat/completions"},
-		{"intl legacy domain", &storedAuth{Auth: storedTokens{Domain: "qoder.sh"}}, "https://api2-v2.qoder.sh/model/v1/chat/completions"},
+		{"intl legacy domain", &storedAuth{Auth: storedTokens{Domain: "qoder.sh"}}, "https://api3.qoder.sh/qsvr/chat/completions"},
 	}
 	for _, tc := range cases {
 		if got := endpointCompletionsFor(tc.sa); got != tc.want {

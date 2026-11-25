@@ -2,6 +2,10 @@
 
 使用方法见 [README](README.md)。发行包在 [Releases](https://github.com/M1nt-Ch0c0/CLIProxyAPI-Qoder-Plugin/releases)。
 
+## 0.8.78
+
+国际版聊天改回 `api3.qoder.sh` 上的 `/qsvr/chat/completions`。`0.8.76` 用的 `api2-v2.qoder.sh` 在公网不存在，请求会一直等到超时。国内版地址不变。
+
 ## 0.8.77
 
 插件实现收到 `internal/qoder`，根目录只留 C 接口。登录、对话、签到的行为与 0.8.76 相同。
