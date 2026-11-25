@@ -162,15 +162,15 @@ func TestParseModelsCatalogNoUsableScene(t *testing.T) {
 }
 
 // TestEndpointModelsForInferencePath pins the catalog URL the desktop app
-// actually GETs: {inference host}/algo/api/v2/model/list with no query
-// (Qoder 0.5.18 intl log, status 200).
+// GETs. Qoder 0.5.18 models.list always sets query Encode=1; the request
+// log only prints origin and path, so the saved line has no '?'.
 func TestEndpointModelsForInferencePath(t *testing.T) {
 	cases := []struct {
 		region string
 		want   string
 	}{
-		{"intl", "https://api3.qoder.sh/algo/api/v2/model/list"},
-		{"cn", "https://gateway.qoder.com.cn/algo/api/v2/model/list"},
+		{"intl", "https://api3.qoder.sh/algo/api/v2/model/list?Encode=1"},
+		{"cn", "https://gateway.qoder.com.cn/algo/api/v2/model/list?Encode=1"},
 	}
 	for _, c := range cases {
 		sa := &storedAuth{Auth: storedTokens{AccessToken: "tok", Region: c.region}}
@@ -182,7 +182,7 @@ func TestEndpointModelsForInferencePath(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if req.Method != http.MethodGet || req.URL.Path != "/algo/api/v2/model/list" || req.URL.RawQuery != "" {
+		if req.Method != http.MethodGet || req.URL.Path != "/algo/api/v2/model/list" || req.URL.Query().Get("Encode") != "1" {
 			t.Errorf("catalog request = %s %s", req.Method, req.URL.RequestURI())
 		}
 	}

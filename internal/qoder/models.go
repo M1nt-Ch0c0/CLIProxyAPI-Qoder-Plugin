@@ -226,9 +226,11 @@ func filterCoolingModels(sa *storedAuth, models []pluginapi.ModelInfo) []plugina
 // for_auth chain without the network. Production always uses callModelsAPI.
 var callModelsAPIFn = callModelsAPI
 
-// callModelsAPI GETs /algo/api/v2/model/list from the account's inference
-// host with COSY signing (same as inference). Returns plain JSON (not
-// QoderEncoding). Falls back to wbModels() on any error.
+// callModelsAPI GETs /algo/api/v2/model/list?Encode=1 from the account's
+// inference host with COSY signing (same as inference). The desktop
+// models.list interceptor always adds Encode=1; the request log drops the
+// query. Returns plain JSON (not QoderEncoding). Falls back to wbModels()
+// on any error.
 func callModelsAPI(sa *storedAuth) ([]pluginapi.ModelInfo, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

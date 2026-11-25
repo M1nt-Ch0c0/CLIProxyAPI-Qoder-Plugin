@@ -162,7 +162,7 @@ func inferenceBaseFor(sa *storedAuth) string {
 }
 
 func endpointModelsFor(sa *storedAuth) string {
-	return inferenceBaseFor(sa) + "/algo/api/v2/model/list"
+	return inferenceBaseFor(sa) + "/algo/api/v2/model/list?Encode=1"
 }
 
 // Login-region config accessors (parsed from login_region in configure()).

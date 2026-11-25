@@ -59,7 +59,7 @@ const (
 	// 0.5.18 GETs the catalog at {inference}/algo/api/v2/model/list and POSTs
 	// chat at {inference}/algo/api/v2/service/pro/sse/agent_chat_generation.
 	endpointChat   = gatewayBaseCN + "/algo/api/v2/service/pro/sse/agent_chat_generation"
-	endpointModels = gatewayBaseCN + "/algo/api/v2/model/list"
+	endpointModels = gatewayBaseCN + "/algo/api/v2/model/list?Encode=1"
 
 	// loginTTL bounds one device-authorization flow. Users may need to log in
 	// to qoder.com.cn first (Aliyun SSO) before authorizing — give them room.
@@ -210,7 +210,7 @@ type registrationCapability struct {
 // version is the plugin's reported version. The c-shared shell owns the
 // ldflags target (-X main.version, kept in lockstep with the VERSION file)
 // and copies it in via SetBuild. This literal is the fallback for tests.
-var version = "0.8.81"
+var version = "0.8.82"
 
 // providerName is the registered plugin id. The unified default is "qoder";
 // split-channel builds rename it with -X main.providerName=qoder-intl, which

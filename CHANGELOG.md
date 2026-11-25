@@ -2,6 +2,10 @@
 
 使用方法见 [README](README.md)。发行包在 [Releases](https://github.com/M1nt-Ch0c0/CLIProxyAPI-Qoder-Plugin/releases)。
 
+## 0.8.82
+
+模型目录加回 `?Encode=1`。桌面版 `models.list` 每次都会带这个参数，请求日志只打印路径，所以 0.8.81 把它漏掉了。聊天地址不变。
+
 ## 0.8.81
 
 聊天和模型目录的地址去掉桌面版请求里没有的参数：`Encode=1`、`FetchKeys`、`AgentId`。模型名仍写在请求体的 `model_config.key`，不再额外加 `x-model-key`。
