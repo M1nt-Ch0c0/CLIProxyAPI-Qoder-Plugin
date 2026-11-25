@@ -379,6 +379,10 @@ func startLoginWithRegion(raw []byte, region string) ([]byte, error) {
 	})
 }
 
+// pollDeviceTokenFn is the test seam for the device-grant poll; unit tests
+// stub it pending so handlePollLogin never reaches the live grant endpoint.
+var pollDeviceTokenFn = pollDeviceToken
+
 // pollDeviceToken performs one GET against /api/v1/deviceToken/poll.
 // Returns (tok, pending, error): pending=true means the user hasn't finished
 // authorizing yet (upstream 404/202) — the host should keep polling.
@@ -477,13 +481,13 @@ func handlePollLogin(raw []byte) ([]byte, error) {
 		loginStates.Delete(state)
 		return okEnvelope(pluginapi.AuthLoginPollResponse{
 			Status: pluginapi.AuthLoginStatusSuccess,
-			Auth:   toAuthData(sa),
+			Auth:   toAuthDataForLogin(sa),
 		})
 	}
 
 	// Device-authorization path: poll the grant. The verifier never left
 	// this process; the nonce pairs it to the auth URL we handed out.
-	tok, pending, err := pollDeviceToken(lc.nonce, lc.verifier, lc.region)
+	tok, pending, err := pollDeviceTokenFn(lc.nonce, lc.verifier, lc.region)
 	if err != nil {
 		return nil, fmt.Errorf("device authorization poll: %w", err)
 	}
@@ -497,21 +501,31 @@ func handlePollLogin(raw []byte) ([]byte, error) {
 		loginStates.Delete(state)
 		return okEnvelope(pluginapi.AuthLoginPollResponse{
 			Status: pluginapi.AuthLoginStatusSuccess,
-			Auth:   toAuthData(sa),
+			Auth:   toAuthDataForLogin(sa),
 		})
 	}
 
 	// Panel-import path: a new qoderwork auth file appeared since StartLogin.
-	files, err := hostAuthList()
+	files, err := hostAuthListFn()
 	if err == nil {
 		for _, f := range files {
 			if f.CreatedAt.UnixNano() > lc.startedAt {
-				sa, err := hostAuthGet(f.AuthIndex)
+				phys, err := hostAuthGetPhysicalFn(f.AuthIndex)
+				if err != nil || phys == nil {
+					continue
+				}
+				sa, err := parseStored(phys.JSON)
 				if err == nil && sa != nil {
 					loginStates.Delete(state)
+					ad := toAuthDataForLogin(sa)
+					// Echo the host's actual file name: the record already
+					// exists under it, a recomputed name would rename-dupe.
+					if fn := strings.TrimSpace(f.Name); fn != "" {
+						ad.FileName = fn
+					}
 					return okEnvelope(pluginapi.AuthLoginPollResponse{
 						Status: pluginapi.AuthLoginStatusSuccess,
-						Auth:   toAuthData(sa),
+						Auth:   ad,
 					})
 				}
 			}
@@ -688,5 +702,16 @@ func toAuthDataForRefresh(sa *storedAuth) pluginapi.AuthData {
 	ad := toAuthDataOpts(sa, nil, false)
 	ad.FileName = "" // let host backfill original
 	ad.ID = ""       // let host compute from path (prevents ID mismatch dupes)
+	return ad
+}
+
+// toAuthDataForLogin blanks ID for the login-success return paths. The host
+// upserts auth records by ID: with ID=uid the login record and the watcher's
+// path-derived record (authIDForPath) land on different keys → two entries
+// for one file. Empty ID makes the host derive the same path key. FileName
+// stays: the host writes the new auth file under it.
+func toAuthDataForLogin(sa *storedAuth) pluginapi.AuthData {
+	ad := toAuthData(sa)
+	ad.ID = ""
 	return ad
 }

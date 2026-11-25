@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.8.75
+
+### Login success no longer double-registers the auth file
+
+The host upserts auth records by `AuthData.ID` and only derives the
+path key (`authIDForPath`) when ID is empty. `handleParseAuth` and the
+refresh path already blank ID for exactly this reason, but the three
+login-success returns in `handlePollLogin` still shipped `ID=uid`
+(`toAuthData`): the login upsert and the file watcher's path-keyed
+upsert landed on different keys, so one file showed up as two identical
+panel entries. All three paths now ride `toAuthDataForLogin` (ID empty,
+FileName kept so the host writes the new file under the canonical name);
+the panel-import branch additionally echoes the host's actual file name
+instead of a recomputed one, and reads through the existing
+`hostAuthListFn` / `hostAuthGetPhysicalFn` seams. `pollDeviceTokenFn` is
+the matching test seam so unit tests never reach the live grant endpoint.
+Tests: `oauth_login_id_test.go` pins empty ID + kept canonical FileName on
+the login helper and empty ID + echoed host FileName on the panel-import
+poll response.
+
+
 ## 0.8.74
 
 ### A requested model key stops being silently rerouted to auto
