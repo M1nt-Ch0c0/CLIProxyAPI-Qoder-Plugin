@@ -1,7 +1,7 @@
 package qoder
 
 // The executor tests below pin the production chat wire contract: an encoded
-// agent_chat_generation POST, model_config.key plus x-model-key, folded
+// agent_chat_generation POST, model_config.key, no x-model-key, folded
 // through qoderUnwrapFrame. The completions helpers earlier in this file
 // cover the unused OpenAI-style dialect and are not what the executor sends.
 
@@ -81,7 +81,7 @@ func stubChatEndpoint(t *testing.T, url string) {
 }
 
 func agentChatURL(base string) string {
-	return base + "/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1"
+	return base + "/algo/api/v2/service/pro/sse/agent_chat_generation"
 }
 
 func decodeCapturedAgentBody(t *testing.T, raw []byte) map[string]any {
@@ -103,8 +103,11 @@ func assertAgentModel(t *testing.T, sent map[string]any, header http.Header) {
 	if mc["key"] != "gmodel_latest" {
 		t.Fatalf("model_config.key = %v, want gmodel_latest", mc["key"])
 	}
-	if got := header.Get("x-model-key"); got != "gmodel_latest" {
-		t.Fatalf("x-model-key = %q, want gmodel_latest", got)
+	if got := header.Get("x-model-key"); got != "" {
+		t.Fatalf("x-model-key = %q, capture has no such header", got)
+	}
+	if got := header.Get("x-model-source"); got != "" {
+		t.Fatalf("x-model-source = %q, capture has no such header", got)
 	}
 	if !strings.HasPrefix(header.Get("Authorization"), "Bearer COSY.") {
 		t.Fatalf("Authorization = %q, want a COSY bearer", header.Get("Authorization"))
@@ -306,8 +309,7 @@ func TestAggregateCompletionsSSEGuards(t *testing.T) {
 
 // TestEndpointChatForDesktopCapture pins the chat URL the desktop app POSTs.
 // Qoder 0.5.18 intl log: POST https://api3.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation
-// returned 200. The model rides model_config.key (asserted on the executor
-// below); the query string is this plugin's encoded-body contract.
+// returned 200, with no query string. The model rides model_config.key.
 func TestEndpointChatForDesktopCapture(t *testing.T) {
 	const path = "/algo/api/v2/service/pro/sse/agent_chat_generation"
 	cases := []struct {
@@ -323,8 +325,8 @@ func TestEndpointChatForDesktopCapture(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if req.URL.Host != c.host || req.URL.Path != path {
-			t.Errorf("region %s chat = %s %s", c.region, req.URL.Host, req.URL.Path)
+		if req.URL.Host != c.host || req.URL.Path != path || req.URL.RawQuery != "" {
+			t.Errorf("region %s chat = %s %s?%s", c.region, req.URL.Host, req.URL.Path, req.URL.RawQuery)
 		}
 	}
 }
@@ -382,7 +384,7 @@ func TestExecutePostsAgentChatAndFoldsReply(t *testing.T) {
 	}
 
 	method, path, header, body := cap.snapshot()
-	wantPath := "/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1"
+	wantPath := "/algo/api/v2/service/pro/sse/agent_chat_generation"
 	if method != http.MethodPost || path != wantPath {
 		t.Fatalf("must POST agent_chat_generation, got %s %s", method, path)
 	}

@@ -188,7 +188,7 @@ func (s *cosySession) buildBearer(body, rawURL string) (payloadB64, date, bearer
 }
 
 // headers returns the full header set for one inference request.
-// extra headers (x-model-key, x-model-source) are merged in by the caller.
+// the caller applies this map onto the request.
 func (s *cosySession) headers(uid, body, rawURL, accept string, sse bool) (map[string]string, error) {
 	_, date, bearer, err := s.buildBearer(body, rawURL)
 	if err != nil {

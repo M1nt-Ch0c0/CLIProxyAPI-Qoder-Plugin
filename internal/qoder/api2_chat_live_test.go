@@ -23,7 +23,7 @@ func TestLiveApi2Chat(t *testing.T) {
 		t.Fatalf("build: %v", err)
 	}
 	encoded := qoderEncode(body)
-	url := "https://api2.qoder.sh" + "/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1"
+	url := "https://api2.qoder.sh" + "/algo/api/v2/service/pro/sse/agent_chat_generation"
 	hreq, err := http.NewRequest(http.MethodPost, url, strings.NewReader(encoded))
 	if err != nil {
 		t.Fatalf("req: %v", err)

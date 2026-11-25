@@ -58,8 +58,8 @@ const (
 	// Inference endpoints (COSY-signed + QoderEncoding body). Desktop Qoder
 	// 0.5.18 GETs the catalog at {inference}/algo/api/v2/model/list and POSTs
 	// chat at {inference}/algo/api/v2/service/pro/sse/agent_chat_generation.
-	endpointChat   = gatewayBaseCN + "/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1"
-	endpointModels = gatewayBaseCN + "/algo/api/v2/model/list?Encode=1"
+	endpointChat   = gatewayBaseCN + "/algo/api/v2/service/pro/sse/agent_chat_generation"
+	endpointModels = gatewayBaseCN + "/algo/api/v2/model/list"
 
 	// loginTTL bounds one device-authorization flow. Users may need to log in
 	// to qoder.com.cn first (Aliyun SSO) before authorizing — give them room.
@@ -210,7 +210,7 @@ type registrationCapability struct {
 // version is the plugin's reported version. The c-shared shell owns the
 // ldflags target (-X main.version, kept in lockstep with the VERSION file)
 // and copies it in via SetBuild. This literal is the fallback for tests.
-var version = "0.8.80"
+var version = "0.8.81"
 
 // providerName is the registered plugin id. The unified default is "qoder";
 // split-channel builds rename it with -X main.providerName=qoder-intl, which
@@ -435,8 +435,10 @@ func commonHeaders(req *http.Request) {
 
 // applyCosyHeaders computes the full COSY-signed header set for one inference
 // request and applies it to req. Body must be the QoderEncoding-encoded
-// request body (string form), url the gateway endpoint, modelKey the
-// upstream model key (goes into x-model-key). sse toggles cache-control.
+// request body (string form). The desktop app's captured chat does not send
+// x-model-key; the model rides model_config.key in the body. modelKey is
+// kept so callers still pass the upstream key they put in that body.
+// sse toggles cache-control.
 //
 // Returns an error if the cosy session cannot be built (e.g. empty token).
 func applyCosyHeaders(req *http.Request, sa *storedAuth, encodedBody, rawURL, modelKey string, sse bool) error {
@@ -450,10 +452,6 @@ func applyCosyHeaders(req *http.Request, sa *storedAuth, encodedBody, rawURL, mo
 	}
 	for k, v := range hdr {
 		req.Header.Set(k, v)
-	}
-	if modelKey != "" {
-		req.Header.Set("x-model-key", modelKey)
-		req.Header.Set("x-model-source", "system")
 	}
 	return nil
 }

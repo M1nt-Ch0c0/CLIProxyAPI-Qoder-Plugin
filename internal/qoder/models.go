@@ -226,9 +226,9 @@ func filterCoolingModels(sa *storedAuth, models []pluginapi.ModelInfo) []plugina
 // for_auth chain without the network. Production always uses callModelsAPI.
 var callModelsAPIFn = callModelsAPI
 
-// callModelsAPI GETs /algo/api/v2/model/list?Encode=1 from the account's
-// inference host with COSY signing (same as inference). Returns plain JSON
-// (not QoderEncoding). Falls back to wbModels() on any error.
+// callModelsAPI GETs /algo/api/v2/model/list from the account's inference
+// host with COSY signing (same as inference). Returns plain JSON (not
+// QoderEncoding). Falls back to wbModels() on any error.
 func callModelsAPI(sa *storedAuth) ([]pluginapi.ModelInfo, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -240,7 +240,7 @@ func callModelsAPI(sa *storedAuth) ([]pluginapi.ModelInfo, error) {
 	// 3/3 repros; body==signed-body passes 3/3). A GET with a body is
 	// unusual but legal, and matches how the chat path signs+sends.
 	encodedBody := qoderEncode([]byte("{}"))
-	rawURL := endpointModelsFor(sa) // includes ?Encode=1
+	rawURL := endpointModelsFor(sa)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, strings.NewReader(encodedBody))
 	if err != nil {
 		return nil, err

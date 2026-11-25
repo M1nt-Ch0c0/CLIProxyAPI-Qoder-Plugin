@@ -124,7 +124,7 @@ func endpointUserInfoForRegion(region string) string {
 // (checkin.go claimProViaCampaigns, campaign.go claimCampaignByID).
 
 func endpointChatFor(sa *storedAuth) string {
-	return gatewayBaseFor(sa) + "/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1"
+	return gatewayBaseFor(sa) + "/algo/api/v2/service/pro/sse/agent_chat_generation"
 }
 
 // endpointChatFn is the test seam for the chat URL. Production posts the
@@ -162,7 +162,7 @@ func inferenceBaseFor(sa *storedAuth) string {
 }
 
 func endpointModelsFor(sa *storedAuth) string {
-	return inferenceBaseFor(sa) + "/algo/api/v2/model/list?Encode=1"
+	return inferenceBaseFor(sa) + "/algo/api/v2/model/list"
 }
 
 // Login-region config accessors (parsed from login_region in configure()).

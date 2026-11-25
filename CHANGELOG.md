@@ -2,6 +2,10 @@
 
 使用方法见 [README](README.md)。发行包在 [Releases](https://github.com/M1nt-Ch0c0/CLIProxyAPI-Qoder-Plugin/releases)。
 
+## 0.8.81
+
+聊天和模型目录的地址去掉桌面版请求里没有的参数：`Encode=1`、`FetchKeys`、`AgentId`。模型名仍写在请求体的 `model_config.key`，不再额外加 `x-model-key`。
+
 ## 0.8.80
 
 模型目录改回桌面版正在用的 `GET /algo/api/v2/model/list`。0.8.74 去掉 `/algo` 之后这个地址是空 404，目录会悄悄退回写死的表。聊天仍是 `POST /algo/api/v2/service/pro/sse/agent_chat_generation`。
