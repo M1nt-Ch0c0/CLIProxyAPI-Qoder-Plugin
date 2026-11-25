@@ -2,6 +2,10 @@
 
 使用方法见 [README](README.md)。发行包在 [Releases](https://github.com/M1nt-Ch0c0/CLIProxyAPI-Qoder-Plugin/releases)。
 
+## 0.8.77
+
+插件实现收到 `internal/qoder`，根目录只留 C 接口。登录、对话、签到的行为与 0.8.76 相同。
+
 ## 0.8.76
 
 聊天请求改走客户端现在用的 completions 接口，模型名写在顶层 `model`。旧接口只改 `model_config.key` 时，服务会把请求按 `auto` 处理。
