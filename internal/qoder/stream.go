@@ -436,9 +436,6 @@ func pumpUpstreamStream(httpReq *http.Request, rebuild func() (*http.Request, er
 				if authID != "" {
 					recordUpstreamFailure(authID, cooldownModel, statusCode, string(errPayload))
 				}
-				if authUID != "" {
-					go reconcileByUID(authUID, statusCode, string(errPayload))
-				}
 				// Nothing was delivered, so with the gate open the host gets the real
 				// upstream status here instead of an in-band text error behind a 200.
 				fail(statusCode, upstreamErr)

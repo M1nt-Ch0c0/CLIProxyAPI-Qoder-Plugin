@@ -151,14 +151,11 @@ func centerBaseForRegion(region string) string {
 	return gatewayBaseCN
 }
 
-// inferenceBaseFor resolves the inference host for one account: the region
-// election first; only when it yields no host does center's region-endpoint
-// discovery run (inference_discovery.go). The normal path never hits center.
+// inferenceBaseFor resolves the inference host the way the desktop does:
+// ask center which node this account should use, and keep the fixed
+// regional gateway only when center does not answer.
 func inferenceBaseFor(sa *storedAuth) string {
-	if base := inferenceBaseForRegion(authRegion(sa)); base != "" {
-		return base
-	}
-	return discoverInferenceBaseViaCenter(sa)
+	return electedInferenceBase(sa)
 }
 
 func endpointModelsFor(sa *storedAuth) string {

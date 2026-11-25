@@ -2,6 +2,10 @@
 
 使用方法见 [README](README.md)。发行包在 [Releases](https://github.com/M1nt-Ch0c0/CLIProxyAPI-Qoder-Plugin/releases)。
 
+## 0.8.84
+
+拉模型名单改用桌面端现在的版本，Sonus、Cantus、Fast 会重新出现。聊天按名单填写显示名、是否推理、是否看图。签到、领权益和积分面板不再提供。
+
 ## 0.8.83
 
 聊天改为桌面版的签名请求。回复里的模型名取目录显示名并转成小写，例如 `GLM-5.4` 写成 `glm-5.4`。发给上游的仍是目录键。插件设置说明改为中文。

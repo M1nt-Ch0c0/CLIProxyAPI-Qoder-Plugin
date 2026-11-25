@@ -417,14 +417,11 @@ func buildQoderBody(req *openAIRequest, modelKey, userType string) ([]byte, erro
 	base["aliyun_user_type"] = userType
 	base["agent_id"] = "agent_common"
 
-	// model_config. 2026-09-19 upstream behavior: every request sends
-	// is_reasoning=true + source="system" (the qwen3.8-flash reasoning chain).
-	// Models that cannot think ignore these fields upstream (verified by the
-	// reference proxy with a fabricated model key). source="system" is the real
-	// reasoning trigger — without it the gateway never streams reasoning_content.
+	// model_config comes from the catalog entry. A key with no catalog
+	// record keeps the template, except the leftover display name "Lite",
+	// which is not a real model name.
 	if mc, ok := base["model_config"].(map[string]any); ok {
-		mc["key"] = modelKey
-		mc["is_reasoning"] = true
+		applyCatalogModel(mc, modelKey)
 		if _, ok := mc["source"]; !ok {
 			mc["source"] = "system"
 		}
@@ -440,8 +437,7 @@ func buildQoderBody(req *openAIRequest, modelKey, userType string) ([]byte, erro
 				oc["text"] = prompt
 			}
 			if mc, ok := extra["modelConfig"].(map[string]any); ok {
-				mc["key"] = modelKey
-				mc["is_reasoning"] = true
+				applyCatalogModel(mc, modelKey)
 			}
 		}
 	}
@@ -536,4 +532,20 @@ func buildQoderBody(req *openAIRequest, modelKey, userType string) ([]byte, erro
 	}
 
 	return json.Marshal(base)
+}
+
+func applyCatalogModel(mc map[string]any, modelKey string) {
+	mc["key"] = modelKey
+	fact, ok := catalogFactFor(modelKey)
+	if !ok {
+		if name, _ := mc["display_name"].(string); name == "Lite" {
+			mc["display_name"] = ""
+		}
+		return
+	}
+	if fact.name != "" {
+		mc["display_name"] = fact.name
+	}
+	mc["is_reasoning"] = fact.reasoning
+	mc["is_vl"] = fact.vision
 }

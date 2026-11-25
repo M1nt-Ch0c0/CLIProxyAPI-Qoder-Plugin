@@ -14,8 +14,41 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
+
+// electInferenceHost is false in hermetic tests. Production asks center.
+var electInferenceHost = true
+
+type electedInference struct {
+	base    string
+	fetched time.Time
+}
+
+var electedInferenceCache sync.Map
+
+func electedInferenceBase(sa *storedAuth) string {
+	region := regionCN
+	if sa != nil {
+		region = authRegion(sa)
+	}
+	fallback := gatewayBaseForRegion(region)
+	if !electInferenceHost || sa == nil {
+		return fallback
+	}
+	if v, ok := electedInferenceCache.Load(region); ok {
+		if e, ok := v.(electedInference); ok && time.Since(e.fetched) < dynamicModelsCacheTTL {
+			return e.base
+		}
+	}
+	base := discoverInferenceBaseViaCenter(sa)
+	if base == "" {
+		base = fallback
+	}
+	electedInferenceCache.Store(region, electedInference{base: base, fetched: time.Now()})
+	return base
+}
 
 func discoverInferenceBaseViaCenter(sa *storedAuth) string {
 	if sa == nil {

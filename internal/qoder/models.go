@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
@@ -28,23 +29,23 @@ import (
 // too.
 func wbModels() []pluginapi.ModelInfo {
 	return []pluginapi.ModelInfo{
-		{ID: "auto", Name: "Auto", ContextLength: 200000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
-		{ID: "ultimate", Name: "Ultimate", ContextLength: 1000000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
-		{ID: "fast", Name: "Fast", ContextLength: 200000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
-		{ID: "efficient", Name: "Efficient", ContextLength: 200000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
-		{ID: "smodel", Name: "Sonus", ContextLength: 180000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
-		{ID: "cmodel", Name: "Cantus", ContextLength: 180000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
-		{ID: "qmodel_latest", Name: "Qwen4-Max", ContextLength: 1000000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
-		{ID: "qmodel_38max", Name: "Qwen3.8-Max", ContextLength: 180000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
-		{ID: "qfmodel", Name: "Qwen3.8-Flash", ContextLength: 180000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
-		{ID: "kmodel_latest", Name: "Kimi-K3.1-Pro", ContextLength: 180000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
-		{ID: "kmodel", Name: "Kimi-K2.8-Preview", ContextLength: 180000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
-		{ID: "gmodel_latest", Name: "GLM-5.4", ContextLength: 180000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
-		{ID: "gmodel", Name: "GLM-5.3", ContextLength: 180000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
-		{ID: "gfmodel", Name: "GLM-5.3-Flash", ContextLength: 1000000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
-		{ID: "dmodel", Name: "DeepSeek-V4-Pro", ContextLength: 1000000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
-		{ID: "dfmodel", Name: "DeepSeek-Flash", ContextLength: 1000000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
-		{ID: "mmodel", Name: "MiniMax-M3.1-Flash", ContextLength: 180000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
+		{ID: "auto", Name: "Auto", ContextLength: 200000, MaxCompletionTokens: 32000, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
+		{ID: "ultimate", Name: "Ultimate", ContextLength: 1000000, MaxCompletionTokens: 32000, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
+		{ID: "fast", Name: "Fast", ContextLength: 200000, MaxCompletionTokens: 32000, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
+		{ID: "efficient", Name: "Efficient", ContextLength: 200000, MaxCompletionTokens: 32000, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
+		{ID: "smodel", Name: "Sonus", ContextLength: 180000, MaxCompletionTokens: 32000, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
+		{ID: "cmodel", Name: "Cantus", ContextLength: 180000, MaxCompletionTokens: 32000, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
+		{ID: "qmodel_latest", Name: "Qwen4-Max", ContextLength: 1000000, MaxCompletionTokens: 32000, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
+		{ID: "qmodel_38max", Name: "Qwen3.8-Max", ContextLength: 180000, MaxCompletionTokens: 32000, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
+		{ID: "qfmodel", Name: "Qwen3.8-Flash", ContextLength: 180000, MaxCompletionTokens: 32000, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
+		{ID: "kmodel_latest", Name: "Kimi-K3.1-Pro", ContextLength: 180000, MaxCompletionTokens: 32000, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
+		{ID: "kmodel", Name: "Kimi-K2.8-Preview", ContextLength: 180000, MaxCompletionTokens: 32000, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
+		{ID: "gmodel_latest", Name: "GLM-5.4", ContextLength: 180000, MaxCompletionTokens: 32000, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
+		{ID: "gmodel", Name: "GLM-5.3", ContextLength: 180000, MaxCompletionTokens: 32000, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
+		{ID: "gfmodel", Name: "GLM-5.3-Flash", ContextLength: 1000000, MaxCompletionTokens: 32000, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
+		{ID: "dmodel", Name: "DeepSeek-V4-Pro", ContextLength: 1000000, MaxCompletionTokens: 32000, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
+		{ID: "dfmodel", Name: "DeepSeek-Flash", ContextLength: 1000000, MaxCompletionTokens: 32000, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
+		{ID: "mmodel", Name: "MiniMax-M3.1-Flash", ContextLength: 180000, MaxCompletionTokens: 32000, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
 	}
 }
 
@@ -339,11 +340,18 @@ func parseModelsCatalog(body []byte) ([]pluginapi.ModelInfo, error) {
 			if n, ok := catalogNumber(e["max_input_tokens"]); ok && n > 0 {
 				ctxLen = int64(n)
 			}
+			// The catalog does not send max_output_tokens. Desktop uses 32000
+			// when the field is missing, and the field's value when it is set.
+			maxOut := int64(32000)
+			if n, ok := catalogNumber(e["max_output_tokens"]); ok && n > 0 {
+				maxOut = int64(n)
+			}
+			rememberCatalogFact(key, name, catalogBool(e["is_reasoning"]), catalogBool(e["is_vl"]))
 			out = append(out, pluginapi.ModelInfo{
 				ID:                         key,
 				Name:                       name,
 				ContextLength:              ctxLen,
-				MaxCompletionTokens:        8192,
+				MaxCompletionTokens:        maxOut,
 				OwnedBy:                    providerName,
 				SupportedGenerationMethods: []string{"chat"},
 			})
@@ -353,6 +361,48 @@ func parseModelsCatalog(body []byte) ([]pluginapi.ModelInfo, error) {
 		}
 	}
 	return nil, fmt.Errorf("no usable model scene (assistant/chat/app) in models response")
+}
+
+// catalogFact is what the model list actually said about one key.
+// Chat copies these onto the request. Missing fields stay unset.
+type catalogFact struct {
+	name      string
+	reasoning bool
+	vision    bool
+}
+
+var catalogFacts sync.Map
+
+func rememberCatalogFact(key, name string, reasoning, vision bool) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return
+	}
+	catalogFacts.Store(key, catalogFact{name: name, reasoning: reasoning, vision: vision})
+}
+
+func catalogFactFor(key string) (catalogFact, bool) {
+	v, ok := catalogFacts.Load(strings.TrimSpace(key))
+	if !ok {
+		return catalogFact{}, false
+	}
+	fact, ok := v.(catalogFact)
+	return fact, ok
+}
+
+func catalogBool(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var b bool
+	if json.Unmarshal(raw, &b) == nil {
+		return b
+	}
+	var n float64
+	if json.Unmarshal(raw, &n) == nil {
+		return n != 0
+	}
+	return false
 }
 
 // catalogString mirrors the worker's cf(): a non-empty JSON string, else "".

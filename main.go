@@ -62,7 +62,7 @@ import (
 // version is injected at build time via -ldflags "-X main.version=...".
 // It must track the VERSION file when the flag is absent (version_guard_test).
 // SetBuild copies it into the plugin before the host calls in.
-var version = "0.8.83"
+var version = "0.8.84"
 
 // providerName is a VAR (split flavor, issue #29): the unified build keeps
 // "qoder"; split-channel builds rename it via

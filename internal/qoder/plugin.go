@@ -210,7 +210,7 @@ type registrationCapability struct {
 // version is the plugin's reported version. The c-shared shell owns the
 // ldflags target (-X main.version, kept in lockstep with the VERSION file)
 // and copies it in via SetBuild. This literal is the fallback for tests.
-var version = "0.8.83"
+var version = "0.8.84"
 
 // providerName is the registered plugin id. The unified default is "qoder";
 // split-channel builds rename it with -X main.providerName=qoder-intl, which
@@ -228,14 +228,10 @@ func wbRegistration() registration {
 			Logo:             pluginLogoURL,
 			ConfigFields: []pluginapi.ConfigField{
 				{Name: "queue_wait_budget", Type: pluginapi.ConfigFieldTypeString, Description: "单次排队等待上限，0–150 秒，默认 150。填 0 关闭排队。"},
-				{Name: "checkin_auto", Type: pluginapi.ConfigFieldTypeBoolean, Description: "每天自动签到，默认开启。"},
 				{Name: "login_region", Type: pluginapi.ConfigFieldTypeEnum, EnumValues: []string{regionCN, regionIntl}, Description: "新账号登录地区。cn 国内，intl 国际，默认 cn。已有账号不变。"},
 				{Name: "login_dialect", Type: pluginapi.ConfigFieldTypeEnum, EnumValues: []string{loginDialectCockpit, loginDialectDesktop}, Description: "已停用，修改无效。"},
-				{Name: "claim_unverified", Type: pluginapi.ConfigFieldTypeBoolean, Description: "面额无法确认时也领取 Pro 奖励，默认关闭。"},
-				{Name: "lifecycle_auto", Type: pluginapi.ConfigFieldTypeBoolean, Description: "国内账号积分用完自动停用，签到恢复后自动启用，默认开启。"},
-				{Name: "token_keepalive", Type: pluginapi.ConfigFieldTypeBoolean, Description: "每天 22:00 刷新登录状态，默认开启。"},
 				{Name: "models", Type: pluginapi.ConfigFieldTypeArray, Description: "自定义模型列表。每项可含 id、name、alias、context、max_tokens、enabled、reasoning。"},
-				{Name: "scheduler_mode", Type: pluginapi.ConfigFieldTypeEnum, EnumValues: []string{schedulerModeOff, schedulerModeCredits}, Description: "多账号选择。off 用系统默认，credits 选剩余积分最多的账号，默认 off。选 off 且关闭自动停用时，积分用完的账号仍会被分配。"},
+				{Name: "scheduler_mode", Type: pluginapi.ConfigFieldTypeEnum, EnumValues: []string{schedulerModeOff, schedulerModeCredits}, Description: "多账号选择。off 用系统默认，credits 用面板上选中的账号，默认 off。"},
 				{Name: "usage_report_url", Type: pluginapi.ConfigFieldTypeString, Description: "用量上报地址，留空使用默认。"},
 				{Name: "usage_report_key", Type: pluginapi.ConfigFieldTypeString, Description: "用量上报密钥，留空自动读取。"},
 			},
@@ -629,7 +625,7 @@ func handleExecExecute(raw []byte) ([]byte, error) {
 		publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, 0, "payload parse: "+err.Error())
 		return nil, fmt.Errorf("payload parse: %w", err)
 	}
-	body, err := buildQoderBody(qwReq, upstreamModel, uiUserType(nil))
+	body, err := buildQoderBody(qwReq, upstreamModel, "")
 	if err != nil {
 		publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, 0, "body build: "+err.Error())
 		return nil, fmt.Errorf("body build: %w", err)
@@ -750,7 +746,7 @@ func handleExecStream(raw []byte) ([]byte, error) {
 		publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, 0, "payload parse: "+err.Error())
 		return nil, fmt.Errorf("payload parse: %w", err)
 	}
-	body, err := buildQoderBody(qwReq, upstreamModel, uiUserType(nil))
+	body, err := buildQoderBody(qwReq, upstreamModel, "")
 	if err != nil {
 		publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, 0, "body build: "+err.Error())
 		return nil, fmt.Errorf("body build: %w", err)

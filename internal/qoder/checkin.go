@@ -30,13 +30,8 @@ var (
 )
 
 func ensureScheduler() {
-	schedulerMu.Lock()
-	defer schedulerMu.Unlock()
-	if schedulerStop != nil {
-		return // already running
-	}
-	schedulerStop = make(chan struct{})
-	go schedulerLoop(schedulerStop)
+	// Check-in, credit lifecycle, and the keepalive tick that rode that
+	// loop are not part of forwarding. Nothing starts.
 }
 
 // Note: there is deliberately no stopCheckinScheduler. The plugin shutdown

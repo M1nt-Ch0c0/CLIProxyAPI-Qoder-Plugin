@@ -52,14 +52,14 @@ func prepareInferChat(sa *storedAuth, body []byte, modelKey string) (*http.Reque
 	}
 	client, err := json.Marshal(map[string]string{
 		"client_type":      "5",
-		"business_product": "cli",
+		"business_product": "app",
 		"business_type":    "agent",
 		"scene":            "assistant",
 	})
 	if err != nil {
 		return nil, err
 	}
-	prep, err := callPrepareInfer(gatewayBaseFor(sa), sess.MachineID, "1.1.86-hotfix.19", string(user), string(client), string(body), modelKey, "system")
+	prep, err := callPrepareInfer(inferenceBaseFor(sa), sess.MachineID, desktopClientVersion, string(user), string(client), string(body), modelKey, "system")
 	if err != nil {
 		return nil, err
 	}
@@ -70,12 +70,12 @@ func prepareInferChat(sa *storedAuth, body []byte, modelKey string) (*http.Reque
 	for k, v := range prep.Headers {
 		req.Header.Set(k, v)
 	}
-	// Desktop paid-model retry. Does not change the chunk model field.
+	// This account already confirmed the paid-model prompt on the desktop.
 	if modelKey != "" && modelKey != "auto" {
 		req.Header.Set("Cosy-Paid-Confirmed", "true")
 	}
-	// Desktop injectClientIdentityHeaders sets Cosy-MachineOS on every infer
-	// call. The wasm signer does not.
+	// The plugin has no view of the user's real machine. Use the same
+	// Windows identity the desktop client presents.
 	if req.Header.Get("Cosy-MachineOS") == "" {
 		req.Header.Set("Cosy-MachineOS", simulatedMachineOS())
 	}

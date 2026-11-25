@@ -120,22 +120,13 @@ func managementRegistration() managementRegistrationResponse {
 	base := "/plugins/" + providerName
 	return managementRegistrationResponse{
 		Routes: []managementRoute{
-			{Method: http.MethodGet, Path: base + "/accounts", Description: "List Qoder accounts (CN + Intl) with credits, plan and check-in status."},
-			{Method: http.MethodPost, Path: base + "/refresh", Description: "Force refresh quota/cache for all accounts."},
-			{Method: http.MethodPost, Path: base + "/checkin", Description: "Manually check in one account (auth_index) or all."},
-			{Method: http.MethodPost, Path: base + "/checkin/config", Description: "Toggle auto check-in (enabled: true/false)."},
-			{Method: http.MethodGet, Path: base + "/credits", Description: "Get real-time credits for one (auth_index query) or all accounts."},
-			{Method: http.MethodPost, Path: base + "/import", Description: "Import a QoderWork PAT (pt-...) by exchanging it for a jobToken pair and persisting."},
-			{Method: http.MethodPost, Path: base + "/select", Description: "Select the active account card used for chat routing (body: {auth_index})."},
-			{Method: http.MethodPost, Path: base + "/keepalive", Description: "Manually refresh access tokens for all accounts (or one with auth_index)."},
-			{Method: http.MethodPost, Path: base + "/claim-pro", Description: "Claim one-time Pro upgrade pack for one account (auth_index)."},
-			{Method: http.MethodGet, Path: base + "/keepalive/status", Description: "Last keepalive run summary + config."},
-			{Method: http.MethodGet, Path: base + "/cooldowns", Description: "List active per-(account, model) cooldown entries."},
-			{Method: http.MethodPost, Path: base + "/cooldowns/clear", Description: "Clear cooldown for one account (auth_id) or one pair (auth_id + model)."},
-			{Method: http.MethodGet, Path: base + "/models/groups", Description: "Per-region model catalog (model_cache snapshots; ?refresh=1 re-discovers) for the panel's exclusion picker."},
-		},
-		Resources: []resourceRoute{
-			{Path: "/panel", Menu: "Qoder", Description: "Qoder dashboard (CN + Intl): credits, check-in, plan, import."},
+			{Method: http.MethodPost, Path: base + "/import", Description: "导入 PAT，换成登录凭证。"},
+			{Method: http.MethodPost, Path: base + "/select", Description: "选择转发用的账号。"},
+			{Method: http.MethodPost, Path: base + "/keepalive", Description: "刷新登录状态。"},
+			{Method: http.MethodGet, Path: base + "/keepalive/status", Description: "上次刷新登录的结果。"},
+			{Method: http.MethodGet, Path: base + "/cooldowns", Description: "正在冷却的账号和模型。"},
+			{Method: http.MethodPost, Path: base + "/cooldowns/clear", Description: "清除冷却。"},
+			{Method: http.MethodGet, Path: base + "/models/groups", Description: "按地区看模型列表。"},
 		},
 	}
 }
@@ -174,24 +165,12 @@ func handleManagement(raw []byte) ([]byte, error) {
 
 	base := loadedManagementBasePath() + "/plugins/" + providerName
 	switch {
-	case req.Method == http.MethodGet && path == base+"/accounts":
-		return okEnvelope(mgmtJSONResponse(http.StatusOK, buildDashboardEx(false, false)))
-	case req.Method == http.MethodPost && path == base+"/refresh":
-		return okEnvelope(mgmtJSONResponse(http.StatusOK, buildDashboardEx(true, true)))
-	case req.Method == http.MethodPost && path == base+"/checkin":
-		return okEnvelope(mgmtJSONResponse(http.StatusOK, handleManualCheckin(req)))
-	case req.Method == http.MethodPost && path == base+"/checkin/config":
-		return okEnvelope(mgmtJSONResponse(http.StatusOK, handleCheckinConfig(req)))
-	case req.Method == http.MethodGet && path == base+"/credits":
-		return okEnvelope(mgmtJSONResponse(http.StatusOK, handleCreditsQuery(req)))
 	case req.Method == http.MethodPost && path == base+"/import":
 		return okEnvelope(mgmtJSONResponse(http.StatusOK, handleImportPAT(req)))
 	case req.Method == http.MethodPost && path == base+"/select":
 		return okEnvelope(mgmtJSONResponse(http.StatusOK, handleSelectAuth(req)))
 	case req.Method == http.MethodPost && path == base+"/keepalive":
 		return okEnvelope(mgmtJSONResponse(http.StatusOK, handleKeepaliveNow(req)))
-	case req.Method == http.MethodPost && path == base+"/claim-pro":
-		return okEnvelope(mgmtJSONResponse(http.StatusOK, handleClaimPro(req)))
 	case req.Method == http.MethodGet && path == base+"/keepalive/status":
 		return okEnvelope(mgmtJSONResponse(http.StatusOK, handleKeepaliveStatus()))
 	case req.Method == http.MethodGet && path == base+"/cooldowns":

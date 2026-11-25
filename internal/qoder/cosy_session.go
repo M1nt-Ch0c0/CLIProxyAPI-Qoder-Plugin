@@ -44,7 +44,7 @@ func cosySessionFor(sa *storedAuth) (*cosySession, error) {
 		YxUID:              "",
 		OrganizationID:     "",
 		OrganizationName:   "",
-		UserType:           "personal_professional_trial",
+		UserType:           "",
 		SecurityOauthToken: sa.Auth.AccessToken,
 		RefreshToken:       sa.Auth.RefreshToken,
 	}

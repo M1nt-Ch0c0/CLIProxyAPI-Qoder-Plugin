@@ -118,7 +118,7 @@ type userInfoResponse struct {
 	Avatar           string `json:"avatar"`
 	OrganizationID   string `json:"organization_id"`
 	OrganizationName string `json:"organization_name"`
-	UserType         string `json:"user_type"` // may be absent; falls back to "personal_professional_trial"
+	UserType         string `json:"user_type"` // absent on this endpoint; chat sends "" rather than a guessed plan
 }
 
 // fetchUserInfo queries /api/v1/userinfo with a jt- Bearer to populate the
@@ -183,8 +183,8 @@ func buildStoredAuthFromJobToken(pat string, tok *jobTokenResponse, ui *userInfo
 }
 
 func uiUserType(ui *userInfoResponse) string {
-	if ui == nil || ui.UserType == "" {
-		return "personal_professional_trial"
+	if ui == nil {
+		return ""
 	}
 	return ui.UserType
 }

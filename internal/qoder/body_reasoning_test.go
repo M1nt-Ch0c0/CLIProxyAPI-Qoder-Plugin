@@ -11,7 +11,7 @@ import (
 // 2026-09-19 upstream alignment (reference: icebears111/qoderwork2api,
 // btpp03/qoder-shim, docs.qoder.cn Qwen3.8-Flash limited-free notice):
 //   - new model key qfmodel = Qwen3.8-Flash (limited-time free promo)
-//   - every request sends is_reasoning=true + source="system" (unified
+//   - is_reasoning follows the catalog entry + source="system" (unified
 //     reasoning chain); upstream ignores both for models that cannot think
 //   - OpenAI-style reasoning_effort (low/medium/xhigh) maps to the upstream
 //     thinking parameters; absent/invalid keeps upstream defaults
@@ -182,6 +182,8 @@ func TestCPAToUpstreamKeyTargetsExistInStaticCatalog(t *testing.T) {
 }
 
 func TestBuildQoderBodyReasoningAlwaysOn(t *testing.T) {
+	rememberCatalogFact("qfmodel", "Qwen3.8-Flash", true, false)
+	t.Cleanup(func() { catalogFacts.Delete("qfmodel") })
 	req := &openAIRequest{Model: "qfmodel", Messages: []openAIMessage{{Role: "user", Content: "hi"}}}
 	raw, err := buildQoderBody(req, "qfmodel", "personal_professional_trial")
 	if err != nil {
@@ -203,6 +205,9 @@ func TestBuildQoderBodyReasoningAlwaysOn(t *testing.T) {
 	}
 	if v, _ := mc["key"].(string); v != "qfmodel" {
 		t.Errorf("model_config.key = %q, want qfmodel", v)
+	}
+	if v, _ := mc["display_name"].(string); v != "Qwen3.8-Flash" {
+		t.Errorf("model_config.display_name = %q, want Qwen3.8-Flash", v)
 	}
 	cc, _ := m["chat_context"].(map[string]any)
 	extra, _ := cc["extra"].(map[string]any)

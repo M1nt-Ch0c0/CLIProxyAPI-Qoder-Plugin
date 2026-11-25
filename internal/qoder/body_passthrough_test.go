@@ -143,10 +143,12 @@ func TestBuildQoderBodySlimPassthrough(t *testing.T) {
 	if _, ok := m["tools"]; ok {
 		t.Error("template tools must be dropped in slim mode without client tools")
 	}
-	// reasoning chain stays on (0.8.10 semantics)
 	mc, _ := m["model_config"].(map[string]any)
-	if v, _ := mc["is_reasoning"].(bool); !v {
-		t.Error("slim mode lost is_reasoning=true")
+	if v, _ := mc["is_reasoning"].(bool); v {
+		t.Error("is_reasoning must come from the catalog, not be forced on")
+	}
+	if v, _ := mc["display_name"].(string); v == "Lite" {
+		t.Error("template display name Lite must not be sent")
 	}
 	biz, _ := m["business"].(map[string]any)
 	if v, _ := biz["model_key"].(string); v != "qfmodel" {

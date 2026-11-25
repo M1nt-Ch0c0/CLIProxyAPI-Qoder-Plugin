@@ -160,6 +160,10 @@ func newCosySession(id cosyIdentity) (*cosySession, error) {
 	}, nil
 }
 
+// desktopClientVersion is the Qoder 0.5.18 worker version. The catalog
+// omits models when this header is an older value.
+const desktopClientVersion = "1.1.86-hotfix.19"
+
 // buildBearer constructs the Authorization header for one request.
 // pathSig is url.Path with the "/algo" prefix stripped; body is the raw
 // (already QoderEncoding-encoded) request body string.
@@ -173,7 +177,7 @@ func (s *cosySession) buildBearer(body, rawURL string) (payloadB64, date, bearer
 		pathSig = pathSig[len("/algo"):]
 	}
 	payload := map[string]string{
-		"cosyVersion": "0.1.43",
+		"cosyVersion": desktopClientVersion,
 		"ideVersion":  "",
 		"info":        s.Info,
 		"requestId":   uuid.NewString(),
@@ -203,10 +207,9 @@ func (s *cosySession) headers(uid, body, rawURL, accept string, sse bool) (map[s
 		"cosy-user":         uid,
 		"cosy-key":          s.CosyKey,
 		"accept":            accept,
-		"cosy-clientip":     "169.254.198.161",
 		"authorization":     bearer,
 		"accept-encoding":   "identity",
-		"cosy-version":      "0.1.43",
+		"cosy-version":      desktopClientVersion,
 		"cosy-machineid":    s.MachineID,
 		"cosy-machinetoken": s.MachineToken,
 		"login-version":     "v2",
