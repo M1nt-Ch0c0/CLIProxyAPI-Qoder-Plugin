@@ -14,11 +14,11 @@ import (
 func TestLiveApi2Chat(t *testing.T) {
 	sa := liveImageAuth(t)
 	req := &openAIRequest{}
-	raw := []byte(`{"model":"qmodel","stream":false,"messages":[{"role":"user","content":"Reply with exactly one word: pong"}]}`)
+	raw := []byte(`{"model":"qfmodel","stream":false,"messages":[{"role":"user","content":"Reply with exactly one word: pong"}]}`)
 	if err := json.Unmarshal(raw, req); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	body, err := buildQoderBody(req, "qmodel", uiUserType(nil))
+	body, err := buildQoderBody(req, "qfmodel", uiUserType(nil))
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -29,7 +29,7 @@ func TestLiveApi2Chat(t *testing.T) {
 		t.Fatalf("req: %v", err)
 	}
 	// sign against the api2 URL (path identical, so cosy sig matches)
-	if err := applyCosyHeaders(hreq, sa, encoded, url, "qmodel", true); err != nil {
+	if err := applyCosyHeaders(hreq, sa, encoded, url, "qfmodel", true); err != nil {
 		t.Fatalf("cosy: %v", err)
 	}
 	resp, err := liveChatClient().Do(hreq)

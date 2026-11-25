@@ -23,45 +23,59 @@ var basepromptJSON []byte
 // Qoder gateway recognises. Unknown names pass through unchanged (the server
 // silently routes them to auto).
 //
-// Upstream chat-scene catalog as of 2026-09: auto, ultimate, performance,
-// efficient, qmodel_38max, qfmodel, qmodel_latest, qmodel, kmodel_latest,
-// kmodel, gmodel, gfmodel, dmodel, dfmodel, mmodel (issue #8 — a stale table
-// here meant a requested rename silently routed to auto).
+// Upstream assistant-scene catalog as of 2026-11-25: auto, ultimate, fast,
+// efficient, smodel, cmodel, qmodel_latest, qmodel_38max, qfmodel,
+// kmodel_latest, kmodel, gmodel_latest, gmodel, gfmodel, dmodel, dfmodel,
+// mmodel. Every alias target below is a key that catalog still carries —
+// retired keys (performance, qmodel, q36fmodel) are retargeted to their
+// current successors instead of being passed through to a silent auto.
 func cpaToUpstreamKey(cpaModel string) string {
 	switch cpaModel {
 	case "qoder-auto", "auto":
 		return "auto"
 	case "qoder-ultimate", "ultimate":
 		return "ultimate"
-	case "qoder-performance", "performance":
-		return "performance"
+	case "qoder-fast", "fast":
+		return "fast"
 	case "qoder-efficient", "efficient":
 		return "efficient"
+	// performance was retired from the tier lineup; fast is the current
+	// mid tier between ultimate and efficient.
+	case "qoder-performance", "performance":
+		return "fast"
+	case "sonus", "smodel":
+		return "smodel"
+	case "cantus", "cmodel":
+		return "cmodel"
 	// Qwen3.8-Max. qmodel_preview / qwen3.8-max-preview are the retired pre-0.12 keys.
 	case "qwen3.8-max", "qwen3.8-max-preview", "qmodel_38max", "qmodel_preview":
 		return "qmodel_38max"
 	case "qwen3.8-flash", "qfmodel":
 		return "qfmodel"
-	case "qwen3.7-max", "qmodel_latest":
+	case "qwen4-max", "qwen3.7-max", "qmodel_latest":
 		return "qmodel_latest"
+	// qmodel (Qwen3.7-Plus) was retired; qmodel_latest is the family successor.
 	case "qwen3.7-plus", "qmodel":
-		return "qmodel"
+		return "qmodel_latest"
+	// q36fmodel (Qwen3.6-Flash) was retired; qfmodel is the current flash.
 	case "qwen3.6-flash", "q36fmodel":
-		return "q36fmodel"
+		return "qfmodel"
 	case "deepseek-v4-pro", "dmodel":
 		return "dmodel"
 	case "deepseek-flash", "deepseek-v4-flash", "dfmodel":
 		return "dfmodel"
+	case "glm-5.4", "gmodel_latest":
+		return "gmodel_latest"
 	// GLM-5.3. gm51model (GLM-5.2) was retired upstream.
 	case "glm-5.3", "glm-5.2", "gmodel", "gm51model":
 		return "gmodel"
 	case "glm-5.3-flash", "gfmodel":
 		return "gfmodel"
-	case "kimi-k3", "kmodel_latest":
+	case "kimi-k3.1-pro", "kimi-k3", "kmodel_latest":
 		return "kmodel_latest"
 	case "kimi-k2.8-preview", "kimi-k2.7-code", "kmodel":
 		return "kmodel"
-	case "minimax-m3", "minimax-m2.7", "mmodel":
+	case "minimax-m3.1-flash", "minimax-m3", "minimax-m2.7", "mmodel":
 		return "mmodel"
 	}
 	return cpaModel

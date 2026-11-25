@@ -27,26 +27,67 @@ func TestCPAToUpstreamKeyQwen38Flash(t *testing.T) {
 		"glm-5.2":             "gmodel",
 		"glm-5.3":             "gmodel",
 		"gm51model":           "gmodel",
+		"glm-5.4":             "gmodel_latest",
+		"gmodel_latest":       "gmodel_latest",
 		"gfmodel":             "gfmodel",
 		"kimi-k3":             "kmodel_latest",
+		"kimi-k3.1-pro":       "kmodel_latest",
 		"kmodel":              "kmodel",
 		"kimi-k2.7-code":      "kmodel",
 		"minimax-m2.7":        "mmodel",
 		"minimax-m3":          "mmodel",
+		"minimax-m3.1-flash":  "mmodel",
 		"deepseek-flash":      "dfmodel",
 		"qwen3.7-max":         "qmodel_latest",
-		"qwen3.6-flash":       "q36fmodel",
-		"deepseek-v4-flash":   "dfmodel",
-		"auto":                "auto",
-		"ultimate":            "ultimate",
-		"qoder-performance":   "performance",
-		"efficient":           "efficient",
+		"qwen4-max":           "qmodel_latest",
+		// retired keys retarget to current catalog successors — never
+		// pass through to a silent auto.
+		"qwen3.6-flash":     "qfmodel",
+		"q36fmodel":         "qfmodel",
+		"qwen3.7-plus":      "qmodel_latest",
+		"qmodel":            "qmodel_latest",
+		"qoder-performance": "fast",
+		"performance":       "fast",
+		"deepseek-v4-flash": "dfmodel",
+		"auto":              "auto",
+		"ultimate":          "ultimate",
+		"fast":              "fast",
+		"sonus":             "smodel",
+		"smodel":            "smodel",
+		"cantus":            "cmodel",
+		"cmodel":            "cmodel",
+		"efficient":         "efficient",
 		// dynamic-discovery keys ride along unchanged
 		"brand-new-key": "brand-new-key",
 	}
 	for in, want := range cases {
 		if got := cpaToUpstreamKey(in); got != want {
 			t.Errorf("cpaToUpstreamKey(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestCPAToUpstreamKeyTargetsExistInStaticCatalog pins the anti-auto rule:
+// every alias target must be a key the current catalog still carries. A
+// target outside wbModels() would be sent upstream verbatim and silently
+// rerouted to auto.
+func TestCPAToUpstreamKeyTargetsExistInStaticCatalog(t *testing.T) {
+	known := make(map[string]bool)
+	for _, m := range wbModels() {
+		known[m.ID] = true
+	}
+	for _, alias := range []string{
+		"qoder-auto", "qoder-ultimate", "qoder-fast", "qoder-efficient",
+		"qoder-performance", "performance", "sonus", "cantus",
+		"qwen3.8-max", "qwen3.8-max-preview", "qmodel_preview",
+		"qwen3.8-flash", "qwen4-max", "qwen3.7-max", "qwen3.7-plus", "qmodel",
+		"qwen3.6-flash", "q36fmodel", "deepseek-v4-pro", "deepseek-flash",
+		"deepseek-v4-flash", "glm-5.4", "glm-5.3", "glm-5.2", "gm51model",
+		"glm-5.3-flash", "kimi-k3.1-pro", "kimi-k3", "kimi-k2.8-preview",
+		"kimi-k2.7-code", "minimax-m3.1-flash", "minimax-m3", "minimax-m2.7",
+	} {
+		if target := cpaToUpstreamKey(alias); !known[target] {
+			t.Errorf("cpaToUpstreamKey(%q) = %q, which is not in the current catalog (would route to auto)", alias, target)
 		}
 	}
 }

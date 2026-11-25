@@ -86,7 +86,11 @@ const (
 	// the intl auth/billing API, api3.qoder.sh the intl inference gateway.
 	upstreamBaseIntl = "https://openapi.qoder.sh"
 	gatewayBaseIntl  = "https://api3.qoder.sh"
-	clientUA         = "Go-http-client/2.0"
+	// centerBaseIntl hosts the Intl region-endpoint discovery service
+	// (/api/v3|v5/service/region/endpoints). CN's center rides the gateway
+	// host itself (the CN client elects gateway.qoder.com.cn for center).
+	centerBaseIntl = "https://center.qoder.sh"
+	clientUA       = "Go-http-client/2.0"
 
 	// Auth endpoints (PAT → jobToken exchange + refresh).
 	endpointJobTokenExchange = upstreamBaseCN + "/api/v1/jobToken/exchange"
@@ -106,9 +110,12 @@ const (
 	// app.asar) — the 领取Pro flow rides the campaigns channel now
 	// (checkin.go claimProViaCampaigns).
 
-	// Inference endpoints (COSY-signed + QoderEncoding body).
+	// Inference endpoints (COSY-signed + QoderEncoding body). The catalog
+	// lives on the inference host WITHOUT the /algo prefix (client worker:
+	// GET {inference}/api/v2/model/list?Encode=1); chat keeps the gateway
+	// /algo dialect.
 	endpointChat   = gatewayBaseCN + "/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1"
-	endpointModels = gatewayBaseCN + "/algo/api/v2/model/list?Encode=1"
+	endpointModels = gatewayBaseCN + "/api/v2/model/list?Encode=1"
 
 	// loginTTL bounds one device-authorization flow. Users may need to log in
 	// to qoder.com.cn first (Aliyun SSO) before authorizing — give them room.
@@ -356,7 +363,7 @@ type registrationCapability struct {
 }
 
 // version is injected at build time via -ldflags "-X main.version=...".
-var version = "0.8.73"
+var version = "0.8.74"
 
 // providerName is a VAR (split flavor, issue #29): the unified build keeps
 // the default "qoder"; the split-channel builds rename it via

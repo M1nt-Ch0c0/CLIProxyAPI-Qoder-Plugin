@@ -69,15 +69,20 @@ func rawModelsJSON(t *testing.T, sa *storedAuth) string {
 	if resp.StatusCode != 200 {
 		t.Fatalf("models probe http %d: %s", resp.StatusCode, body[:min(300, len(body))])
 	}
-	// The raw body is the chat-scene list only when routed through
-	// callModelsAPI; here we may have the full map — normalize for logging.
+	// The raw body is a single scene list only when routed through
+	// callModelsAPI; here we may have the full map — normalize for logging
+	// (assistant is the client's DEFAULT_SCENE; chat/app are the fallbacks).
 	var pretty map[string]json.RawMessage
 	if json.Unmarshal(buf, &pretty) == nil {
-		if chat, ok := pretty["chat"]; ok {
+		for _, scene := range []string{"assistant", "chat", "app"} {
+			rawScene, ok := pretty[scene]
+			if !ok {
+				continue
+			}
 			var entries []map[string]any
-			if json.Unmarshal(chat, &entries) == nil {
+			if json.Unmarshal(rawScene, &entries) == nil && len(entries) > 0 {
 				out, _ := json.MarshalIndent(entries, "", " ")
-				_ = os.WriteFile(os.TempDir()+"/qoder_catalog_chat.json", out, 0o644)
+				_ = os.WriteFile(os.TempDir()+"/qoder_catalog_"+scene+".json", out, 0o644)
 				return string(out)
 			}
 		}

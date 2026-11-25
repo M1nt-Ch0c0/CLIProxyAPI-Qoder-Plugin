@@ -1,5 +1,61 @@
 # Changelog
 
+## 0.8.74
+
+### A requested model key stops being silently rerouted to auto
+
+Field-verified against the desktop worker (Qoder 0.4.4 / qodercli 1.1.66,
+`qoder-worker-runtime.obf.mjs`): catalog discovery had two defects that
+compounded into the same symptom — a chat asked for a specific model came
+back answered by `auto`.
+
+1. Wrong catalog dialect. `callModelsAPI` / `endpointModelsFor` GETed the
+   gateway's `/algo/api/v2/model/list`. The client reads the catalog from
+   the **inference host** at `/api/v2/model/list?Encode=1` — no `/algo`
+   prefix. The endpoint now rides `inferenceBaseFor(sa)` (the same
+   per-region host election as before; the machine-specific api1/api2/api3
+   election result is NOT hardcoded). Only when that election yields no
+   host at all does a new last-resort probe ask center's
+   `GET /api/v3/service/region/endpoints` (COSY-signed, empty body) and
+   `GET /api/v5/service/region/endpoints` (raw bearer + `x-gw-user-id` +
+   machine identity) for an `inferNodes` entry
+   (`inference_discovery.go`). The endpoint module is otherwise untouched,
+   and the discovery-failure ladder stays: same-region peer → persisted
+   `model_cache` → static table.
+2. Wrong scene + wrong enable decode. The reader only accepted a `chat`
+   scene and decoded `enable` into a Go bool — a missing field became
+   `false` and emptied the list. The client's `DEFAULT_SCENE` is
+   `assistant`; an entry is kept when `key`, `display_name` and `format`
+   are all non-empty strings, and `enable` disables only on a literal
+   `false` or `0` (missing/null/true keep it). `parseModelsCatalog` now
+   walks `assistant → chat → app`, takes the first scene with a non-empty
+   usable list, and applies exactly those rules. With discovery failing on
+   both counts, every request fell back to the stale 2026-09 static table,
+   whose retired keys (`performance`, `qmodel`, `q36fmodel`) the gateway
+   no longer knows — `cpaToUpstreamKey` passed them through and the gateway
+   silently routed them to `auto`.
+
+- `wbModels()` and `cpaToUpstreamKey` are rebuilt from the live assistant
+  catalog (17 keys): auto, ultimate, fast, efficient, smodel (Sonus),
+  cmodel (Cantus), qmodel_latest (Qwen4-Max), qmodel_38max, qfmodel,
+  kmodel_latest (Kimi-K3.1-Pro), kmodel, gmodel_latest (GLM-5.4), gmodel,
+  gfmodel, dmodel, dfmodel, mmodel (MiniMax-M3.1-Flash). Every alias target
+  is a key the catalog still carries; retired names retarget to their
+  successors (`performance → fast`, `qmodel/qwen3.7-plus → qmodel_latest`,
+  `q36fmodel/qwen3.6-flash → qfmodel`) instead of passing through to auto.
+- The signing rule is unchanged: the model/list GET body is still the
+  signed `qoderEncode("{}")` bytes, and chat keeps the
+  `agent_chat_generation` body with `model_config.key` /
+  `chat_context.extra.modelConfig.key` carrying the real catalog key.
+- Tests: scene ladder (assistant-only, chat-only, empty-assistant→chat,
+  assistant-preferred, app fallback), enable rules (missing/true/null/1
+  kept, false/0 dropped), missing key/display_name/format dropped,
+  inference-host URL shape (no `/algo`), center v3→v5 discovery, and a
+  guard that every `cpaToUpstreamKey` target exists in `wbModels()`. The
+  live catalog dump now normalizes assistant first; the api2 live chat
+  probe rides `qfmodel` instead of the retired `qmodel`.
+
+
 ## 0.8.73
 
 ### The auth.parse response carries the operator fields (issue #68)

@@ -4,7 +4,7 @@ A [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) provider plugin fo
 
 This repository is the Qoder plugin by itself. Names `qoder-cn` and `qoder-intl` are split-channel ids. A split build can still register under those ids (`-X main.providerName=qoder-cn` or `qoder-intl`). Install that package in place of the unified plugin.
 
-Built with Go (CGO, c-shared). The component version is `VERSION` (0.8.73 in this tree). `make` injects `git describe --tags --always --dirty`, so a local binary can report a tag plus a commit distance instead of the VERSION file. A hand stamp such as `0.8.87-local.<sha>` is that kind of local build, not the VERSION file.
+Built with Go (CGO, c-shared). The component version is `VERSION` (0.8.74 in this tree). `make` injects `git describe --tags --always --dirty`, so a local binary can report a tag plus a commit distance instead of the VERSION file. A hand stamp such as `0.8.87-local.<sha>` is that kind of local build, not the VERSION file.
 
 CN API hosts are `openapi.qoder.com.cn` and `gateway.qoder.com.cn`. The older qoderwork IDE host `qoder.com.cn` is the login domain this plugin stopped using at component 0.8.45.
 

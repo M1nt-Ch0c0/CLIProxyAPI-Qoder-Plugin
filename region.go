@@ -127,8 +127,36 @@ func endpointChatFor(sa *storedAuth) string {
 	return gatewayBaseFor(sa) + "/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1"
 }
 
+// inferenceBaseForRegion returns the inference host base for a region. The
+// model catalog is served by the inference host at /api/v2/model/list (no
+// /algo prefix) — the same per-region host the chat gateway rides. Which
+// specific inference node a desktop client elects (api1/api2/api3 on Intl)
+// is that machine's election result, not a plugin constant.
+func inferenceBaseForRegion(region string) string {
+	return gatewayBaseForRegion(region)
+}
+
+// centerBaseForRegion returns the region-endpoint discovery host: Intl uses
+// center.qoder.sh; CN's center service rides the gateway host itself.
+func centerBaseForRegion(region string) string {
+	if region == regionIntl {
+		return centerBaseIntl
+	}
+	return gatewayBaseCN
+}
+
+// inferenceBaseFor resolves the inference host for one account: the region
+// election first; only when it yields no host does center's region-endpoint
+// discovery run (inference_discovery.go). The normal path never hits center.
+func inferenceBaseFor(sa *storedAuth) string {
+	if base := inferenceBaseForRegion(authRegion(sa)); base != "" {
+		return base
+	}
+	return discoverInferenceBaseViaCenter(sa)
+}
+
 func endpointModelsFor(sa *storedAuth) string {
-	return gatewayBaseFor(sa) + "/algo/api/v2/model/list?Encode=1"
+	return inferenceBaseFor(sa) + "/api/v2/model/list?Encode=1"
 }
 
 // Login-region config accessors (parsed from login_region in configure()).

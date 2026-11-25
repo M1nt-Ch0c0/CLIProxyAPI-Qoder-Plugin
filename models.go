@@ -15,32 +15,36 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
 
-// wbModels is the static fallback model list for QoderWork CN. Kept in sync
-// with the upstream chat scene as of 2026-09 (issue #8: the previous table
-// still advertised three retired keys — qmodel_preview / q36fmodel /
-// gm51model — and missed the ultimate/performance/efficient tiers plus
-// qmodel_38max / kmodel_latest / gmodel / gfmodel, so a discovery failure
-// silently degraded every user to a stale catalog). Dynamic refresh via
-// /algo/api/v2/model/list replaces this at runtime when an account is
+// wbModels is the static fallback model list. Kept in sync with the live
+// assistant-scene catalog (the client's DEFAULT_SCENE is "assistant", not
+// "chat") as of 2026-11-25: auto, ultimate, fast, efficient, smodel, cmodel,
+// qmodel_latest, qmodel_38max, qfmodel, kmodel_latest, kmodel, gmodel_latest,
+// gmodel, gfmodel, dmodel, dfmodel, mmodel. The 2026-09 chat-scene table
+// advertised keys the gateway no longer knows (performance, qmodel,
+// q36fmodel) — requesting one silently routed to auto. Only keys present in
+// the current catalog are registered here; dynamic refresh via the inference
+// host's /api/v2/model/list replaces this at runtime when an account is
 // present. Aliases use the qoder/ prefix in AuthAttributes; bare IDs work
 // too.
 func wbModels() []pluginapi.ModelInfo {
 	return []pluginapi.ModelInfo{
 		{ID: "auto", Name: "Auto", ContextLength: 200000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
 		{ID: "ultimate", Name: "Ultimate", ContextLength: 1000000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
-		{ID: "performance", Name: "Performance", ContextLength: 1000000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
+		{ID: "fast", Name: "Fast", ContextLength: 200000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
 		{ID: "efficient", Name: "Efficient", ContextLength: 200000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
+		{ID: "smodel", Name: "Sonus", ContextLength: 180000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
+		{ID: "cmodel", Name: "Cantus", ContextLength: 180000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
+		{ID: "qmodel_latest", Name: "Qwen4-Max", ContextLength: 1000000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
 		{ID: "qmodel_38max", Name: "Qwen3.8-Max", ContextLength: 180000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
 		{ID: "qfmodel", Name: "Qwen3.8-Flash", ContextLength: 180000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
-		{ID: "qmodel_latest", Name: "Qwen3.7-Max", ContextLength: 1000000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
-		{ID: "qmodel", Name: "Qwen3.7-Plus", ContextLength: 1000000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
-		{ID: "kmodel_latest", Name: "Kimi-K3", ContextLength: 180000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
+		{ID: "kmodel_latest", Name: "Kimi-K3.1-Pro", ContextLength: 180000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
 		{ID: "kmodel", Name: "Kimi-K2.8-Preview", ContextLength: 180000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
+		{ID: "gmodel_latest", Name: "GLM-5.4", ContextLength: 180000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
 		{ID: "gmodel", Name: "GLM-5.3", ContextLength: 180000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
 		{ID: "gfmodel", Name: "GLM-5.3-Flash", ContextLength: 1000000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
 		{ID: "dmodel", Name: "DeepSeek-V4-Pro", ContextLength: 1000000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
 		{ID: "dfmodel", Name: "DeepSeek-Flash", ContextLength: 1000000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
-		{ID: "mmodel", Name: "MiniMax-M3", ContextLength: 1000000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
+		{ID: "mmodel", Name: "MiniMax-M3.1-Flash", ContextLength: 180000, MaxCompletionTokens: 8192, OwnedBy: providerName, SupportedGenerationMethods: []string{"chat"}},
 	}
 }
 
@@ -222,9 +226,9 @@ func filterCoolingModels(sa *storedAuth, models []pluginapi.ModelInfo) []plugina
 // for_auth chain without the network. Production always uses callModelsAPI.
 var callModelsAPIFn = callModelsAPI
 
-// callModelsAPI GETs /algo/api/v2/model/list from the QoderWork gateway
-// with COSY signing (same as inference). Returns plain JSON (not QoderEncoding).
-// Falls back to wbModels() on any error.
+// callModelsAPI GETs /api/v2/model/list?Encode=1 from the account's inference
+// host with COSY signing (same as inference). Returns plain JSON (not
+// QoderEncoding). Falls back to wbModels() on any error.
 func callModelsAPI(sa *storedAuth) ([]pluginapi.ModelInfo, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -253,50 +257,103 @@ func callModelsAPI(sa *storedAuth) ([]pluginapi.ModelInfo, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("models API status %d", resp.StatusCode)
 	}
-	// Response is plain JSON: {"chat":[{key,display_name,...}], "developer":[...], ...}
+	return parseModelsCatalog(resp.Body)
+}
+
+// modelCatalogScenes is the scene preference order. The client's DEFAULT_SCENE
+// is "assistant" (sg().scene); "chat" and "app" remain as fallbacks for older
+// catalog shapes. The first scene yielding a non-empty usable list wins.
+var modelCatalogScenes = []string{"assistant", "chat", "app"}
+
+// parseModelsCatalog decodes a model/list response ({scene: [entry, ...]}).
+// Entry acceptance mirrors the client worker: key, display_name and format
+// must all be non-empty strings; enable defaults to enabled — only a literal
+// false or 0 disables an entry (a missing field decoded into a Go bool would
+// wrongly drop the whole catalog).
+func parseModelsCatalog(body []byte) ([]pluginapi.ModelInfo, error) {
 	var apiResp map[string]json.RawMessage
-	if err := json.Unmarshal(resp.Body, &apiResp); err != nil {
+	if err := json.Unmarshal(body, &apiResp); err != nil {
 		return nil, fmt.Errorf("models parse: %w", err)
 	}
-	// Prefer the "chat" scene (matches our inference use case).
-	chatRaw, ok := apiResp["chat"]
-	if !ok {
-		return nil, fmt.Errorf("no chat scene in models response")
-	}
-	var models []struct {
-		Key            string  `json:"key"`
-		DisplayName    string  `json:"display_name"`
-		Enable         bool    `json:"enable"`
-		IsReasoning    bool    `json:"is_reasoning"`
-		IsVL           bool    `json:"is_vl"`
-		MaxInputTokens int64   `json:"max_input_tokens"`
-		PriceFactor    float64 `json:"price_factor"`
-	}
-	if err := json.Unmarshal(chatRaw, &models); err != nil {
-		return nil, fmt.Errorf("chat scene parse: %w", err)
-	}
-	var out []pluginapi.ModelInfo
-	for _, m := range models {
-		if !m.Enable {
+	for _, scene := range modelCatalogScenes {
+		raw, ok := apiResp[scene]
+		if !ok {
 			continue
 		}
-		ctx2 := int64(180000)
-		if m.MaxInputTokens > 0 {
-			ctx2 = m.MaxInputTokens
+		var entries []map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &entries); err != nil {
+			continue
 		}
-		out = append(out, pluginapi.ModelInfo{
-			ID:                         m.Key,
-			Name:                       m.DisplayName,
-			ContextLength:              ctx2,
-			MaxCompletionTokens:        8192,
-			OwnedBy:                    providerName,
-			SupportedGenerationMethods: []string{"chat"},
-		})
+		out := make([]pluginapi.ModelInfo, 0, len(entries))
+		for _, e := range entries {
+			key := catalogString(e["key"])
+			name := catalogString(e["display_name"])
+			format := catalogString(e["format"])
+			if key == "" || name == "" || format == "" {
+				continue
+			}
+			if !catalogEntryEnabled(e["enable"]) {
+				continue
+			}
+			ctxLen := int64(180000)
+			if n, ok := catalogNumber(e["max_input_tokens"]); ok && n > 0 {
+				ctxLen = int64(n)
+			}
+			out = append(out, pluginapi.ModelInfo{
+				ID:                         key,
+				Name:                       name,
+				ContextLength:              ctxLen,
+				MaxCompletionTokens:        8192,
+				OwnedBy:                    providerName,
+				SupportedGenerationMethods: []string{"chat"},
+			})
+		}
+		if len(out) > 0 {
+			return out, nil
+		}
 	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("no enabled chat models")
+	return nil, fmt.Errorf("no usable model scene (assistant/chat/app) in models response")
+}
+
+// catalogString mirrors the worker's cf(): a non-empty JSON string, else "".
+func catalogString(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
 	}
-	return out, nil
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		return ""
+	}
+	return s
+}
+
+// catalogEntryEnabled mirrors the worker's enable rule
+// (enable: false !== raw && 0 !== raw): missing/null/true/anything-but-false-or-0
+// keeps the entry; only a literal false or numeric 0 drops it.
+func catalogEntryEnabled(raw json.RawMessage) bool {
+	t := strings.TrimSpace(string(raw))
+	switch t {
+	case "", "null":
+		return true
+	case "false":
+		return false
+	}
+	var n float64
+	if json.Unmarshal([]byte(t), &n) == nil && n == 0 {
+		return false
+	}
+	return true
+}
+
+func catalogNumber(raw json.RawMessage) (float64, bool) {
+	if len(raw) == 0 {
+		return 0, false
+	}
+	var n float64
+	if json.Unmarshal(raw, &n) != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 func cacheModelAliases(host pluginapi.HostConfigSummary) {
