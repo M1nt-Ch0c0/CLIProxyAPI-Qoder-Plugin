@@ -1,13 +1,9 @@
 package qoder
 
-// v0.8.76: the chat main path speaks the current client dialect — an
-// OpenAI-style POST with the model key at the TOP LEVEL (completions.go).
-// The legacy agent_chat_generation envelope only carried model_config.key,
-// which the service no longer reads: a request without a top-level model is
-// answered by auto (field report 2026-11-25, panel "model mismatch" — sent
-// gmodel_latest / received auto). These tests pin the wire contract end to
-// end through the real executor handlers, with the endpoint seam pointed at
-// an httptest server.
+// The executor tests below pin the production chat wire contract: an encoded
+// agent_chat_generation POST, model_config.key plus x-model-key, folded
+// through qoderUnwrapFrame. The completions helpers earlier in this file
+// cover the unused OpenAI-style dialect and are not what the executor sends.
 
 import (
 	"encoding/json"
@@ -66,7 +62,7 @@ func completionsCaptureServer(t *testing.T, status int, reply string) (*httptest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		cap.mu.Lock()
-		cap.method, cap.path, cap.header, cap.body = r.Method, r.URL.Path, r.Header.Clone(), raw
+		cap.method, cap.path, cap.header, cap.body = r.Method, r.URL.RequestURI(), r.Header.Clone(), raw
 		cap.hits++
 		cap.mu.Unlock()
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -77,11 +73,42 @@ func completionsCaptureServer(t *testing.T, status int, reply string) (*httptest
 	return srv, cap
 }
 
-func stubCompletionsEndpoint(t *testing.T, url string) {
+func stubChatEndpoint(t *testing.T, url string) {
 	t.Helper()
-	orig := endpointCompletionsFn
-	endpointCompletionsFn = func(*storedAuth) string { return url }
-	t.Cleanup(func() { endpointCompletionsFn = orig })
+	orig := endpointChatFn
+	endpointChatFn = func(*storedAuth) string { return url }
+	t.Cleanup(func() { endpointChatFn = orig })
+}
+
+func agentChatURL(base string) string {
+	return base + "/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1"
+}
+
+func decodeCapturedAgentBody(t *testing.T, raw []byte) map[string]any {
+	t.Helper()
+	plain, err := qoderDecode(string(raw))
+	if err != nil {
+		t.Fatalf("outbound body must be QoderEncoding: %v", err)
+	}
+	var sent map[string]any
+	if err := json.Unmarshal(plain, &sent); err != nil {
+		t.Fatalf("decoded agent body: %v\nplain=%s", err, plain)
+	}
+	return sent
+}
+
+func assertAgentModel(t *testing.T, sent map[string]any, header http.Header) {
+	t.Helper()
+	mc, _ := sent["model_config"].(map[string]any)
+	if mc["key"] != "gmodel_latest" {
+		t.Fatalf("model_config.key = %v, want gmodel_latest", mc["key"])
+	}
+	if got := header.Get("x-model-key"); got != "gmodel_latest" {
+		t.Fatalf("x-model-key = %q, want gmodel_latest", got)
+	}
+	if !strings.HasPrefix(header.Get("Authorization"), "Bearer COSY.") {
+		t.Fatalf("Authorization = %q, want a COSY bearer", header.Get("Authorization"))
+	}
 }
 
 func completionsTestStorage(t *testing.T, region string) []byte {
@@ -277,15 +304,25 @@ func TestAggregateCompletionsSSEGuards(t *testing.T) {
 	}
 }
 
-// --- executor acceptance: the reported bug ------------------------------------
+// --- executor: production chat posts agent_chat_generation -------------------
 
-// TestExecuteSendsTopLevelModelAndFoldsReply is the field-report regression:
-// request "glm-5.4" must leave as top-level model gmodel_latest on the
-// completions endpoint, and the folded completion must carry gmodel_latest —
-// not the auto the legacy envelope produced.
-func TestExecuteSendsTopLevelModelAndFoldsReply(t *testing.T) {
+func TestQoderEncodeRoundTrip(t *testing.T) {
+	plain := []byte(`{"model_config":{"key":"gmodel_latest"},"text":"你好"}`)
+	got, err := qoderDecode(qoderEncode(plain))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(plain) {
+		t.Fatalf("round trip = %s", got)
+	}
+}
+
+// TestExecutePostsAgentChatAndFoldsReply: "glm-5.4" leaves as
+// model_config.key gmodel_latest on agent_chat_generation, and the folded
+// completion carries the model from the upstream chunks.
+func TestExecutePostsAgentChatAndFoldsReply(t *testing.T) {
 	srv, cap := completionsCaptureServer(t, http.StatusOK, completionsSSEBody("gmodel_latest", "hello"))
-	stubCompletionsEndpoint(t, srv.URL+"/model/v1/chat/completions")
+	stubChatEndpoint(t, agentChatURL(srv.URL))
 
 	req := pluginapi.ExecutorRequest{
 		Model:       "glm-5.4",
@@ -313,42 +350,27 @@ func TestExecuteSendsTopLevelModelAndFoldsReply(t *testing.T) {
 		t.Fatal(err)
 	}
 	if completion["model"] != "gmodel_latest" {
-		t.Fatalf("the reply model must be gmodel_latest, not auto: %v", completion["model"])
+		t.Fatalf("the reply model must be gmodel_latest, got %v", completion["model"])
 	}
 	if !strings.Contains(string(resp.Payload), `"content":"hello"`) {
 		t.Fatalf("answer not folded: %s", resp.Payload)
 	}
 
 	method, path, header, body := cap.snapshot()
-	if method != http.MethodPost || path != "/model/v1/chat/completions" {
-		t.Fatalf("must POST the completions path, got %s %s", method, path)
+	wantPath := "/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1"
+	if method != http.MethodPost || path != wantPath {
+		t.Fatalf("must POST agent_chat_generation, got %s %s", method, path)
 	}
-	if got := header.Get("Authorization"); got != "Bearer dt-test-token" {
-		t.Fatalf("Authorization: got %q", got)
-	}
-	for k := range header {
-		if strings.HasPrefix(strings.ToLower(k), "cosy") {
-			t.Fatalf("legacy signed header leaked onto the completions path: %s", k)
-		}
-	}
-	var sent map[string]any
-	if err := json.Unmarshal(body, &sent); err != nil {
-		t.Fatalf("outbound body must be plain JSON: %v", err)
-	}
-	if sent["model"] != "gmodel_latest" {
-		t.Fatalf("the outbound body must carry top-level model gmodel_latest, got %v", sent["model"])
-	}
+	sent := decodeCapturedAgentBody(t, body)
+	assertAgentModel(t, sent, header)
 	if sent["stream"] != true {
-		t.Fatalf("outbound stream must be true, got %v", sent["stream"])
-	}
-	if _, present := sent["model_config"]; present {
-		t.Fatal("the legacy model_config envelope must be gone")
+		t.Fatalf("outbound stream = %v, want true", sent["stream"])
 	}
 }
 
 func TestExecuteRejectsErrorFrame(t *testing.T) {
 	srv, _ := completionsCaptureServer(t, http.StatusOK, "data: {\"error\":{\"message\":\"model not found\"}}\n\n")
-	stubCompletionsEndpoint(t, srv.URL)
+	stubChatEndpoint(t, srv.URL)
 	req := pluginapi.ExecutorRequest{
 		Model:       "glm-5.4",
 		Payload:     []byte(`{"messages":[{"role":"user","content":"hi"}]}`),
@@ -361,9 +383,9 @@ func TestExecuteRejectsErrorFrame(t *testing.T) {
 	}
 }
 
-func TestStreamSyncPathSendsTopLevelModel(t *testing.T) {
+func TestStreamSyncPathPostsAgentChat(t *testing.T) {
 	srv, cap := completionsCaptureServer(t, http.StatusOK, completionsSSEBody("gmodel_latest", "hello"))
-	stubCompletionsEndpoint(t, srv.URL+"/qsvr/chat/completions")
+	stubChatEndpoint(t, agentChatURL(srv.URL))
 
 	req := executorStreamRequest{
 		ExecutorRequest: pluginapi.ExecutorRequest{
@@ -400,23 +422,17 @@ func TestStreamSyncPathSendsTopLevelModel(t *testing.T) {
 	if !strings.Contains(joined, "hello") {
 		t.Fatalf("answer missing from chunks: %s", joined)
 	}
-	_, path, _, body := cap.snapshot()
-	if path != "/qsvr/chat/completions" {
-		t.Fatalf("CN must ride the qsvr completions path, got %s", path)
+	_, path, header, body := cap.snapshot()
+	if !strings.Contains(path, "/algo/api/v2/service/pro/sse/agent_chat_generation") {
+		t.Fatalf("CN must ride agent_chat_generation, got %s", path)
 	}
-	var sent map[string]any
-	if err := json.Unmarshal(body, &sent); err != nil {
-		t.Fatal(err)
-	}
-	if sent["model"] != "gmodel_latest" {
-		t.Fatalf("outbound top-level model: got %v", sent["model"])
-	}
+	assertAgentModel(t, decodeCapturedAgentBody(t, body), header)
 }
 
 func TestStreamAsyncPathDeliversChunks(t *testing.T) {
 	rec := installStreamSinks(t)
 	srv, cap := completionsCaptureServer(t, http.StatusOK, completionsSSEBody("gmodel_latest", "hello"))
-	stubCompletionsEndpoint(t, srv.URL+"/model/v1/chat/completions")
+	stubChatEndpoint(t, agentChatURL(srv.URL))
 
 	req := executorStreamRequest{
 		ExecutorRequest: pluginapi.ExecutorRequest{
@@ -425,7 +441,7 @@ func TestStreamAsyncPathDeliversChunks(t *testing.T) {
 			StorageJSON: completionsTestStorage(t, "intl"),
 			Metadata:    map[string]any{"request_path": "/v1/messages"},
 		},
-		StreamID: "completions-async",
+		StreamID: "agent-async",
 	}
 	raw, _ := json.Marshal(req)
 	out, err := handleExecStream(raw)
@@ -450,19 +466,8 @@ func TestStreamAsyncPathDeliversChunks(t *testing.T) {
 		}
 	}
 	_, _, header, body := cap.snapshot()
-	if got := header.Get("Authorization"); got != "Bearer dt-test-token" {
-		t.Fatalf("Authorization: got %q", got)
-	}
-	var sent map[string]any
-	if err := json.Unmarshal(body, &sent); err != nil {
-		t.Fatal(err)
-	}
-	if sent["model"] != "gmodel_latest" {
-		t.Fatalf("outbound top-level model: got %v", sent["model"])
-	}
+	assertAgentModel(t, decodeCapturedAgentBody(t, body), header)
 }
-
-// --- synchronous collector: queue machinery + guards on the new dialect ------
 
 func TestCollectCompletionsQueueRetryThenSucceeds(t *testing.T) {
 	installFastQueueWait(t)
@@ -478,11 +483,11 @@ func TestCollectCompletionsQueueRetryThenSucceeds(t *testing.T) {
 		_, _ = io.WriteString(w, completionsSSEBody("gmodel_latest", "served after the queue"))
 	}))
 	t.Cleanup(srv.Close)
-	stubCompletionsEndpoint(t, srv.URL)
+	stubChatEndpoint(t, srv.URL)
 
 	sa := &storedAuth{Auth: storedTokens{AccessToken: "dt-test-token", Region: "intl"}}
 	collector := &sseUsageCollector{}
-	chunks, statusCode, err := collectUpstreamStreamCompletions([]byte(`{"model":"gmodel_latest","messages":[]}`), sa, false, collector)
+	chunks, statusCode, err := collectUpstreamStreamCompletions("encoded-body", "gmodel_latest", sa, false, collector)
 	if err != nil || statusCode != 0 {
 		t.Fatalf("the retried round must succeed: status=%d err=%v", statusCode, err)
 	}
@@ -493,7 +498,7 @@ func TestCollectCompletionsQueueRetryThenSucceeds(t *testing.T) {
 		t.Fatalf("expected the answer chunks, got %d", len(chunks))
 	}
 	if collector.detail().TotalTokens != 8 {
-		t.Fatalf("usage must be collected from the plain SSE terminal chunk, got %+v", collector.detail())
+		t.Fatalf("usage must be collected from the terminal chunk, got %+v", collector.detail())
 	}
 }
 
@@ -510,8 +515,8 @@ func TestCollectCompletionsGuards(t *testing.T) {
 	}
 	for _, tc := range cases {
 		srv, _ := completionsCaptureServer(t, http.StatusOK, tc.reply)
-		stubCompletionsEndpoint(t, srv.URL)
-		_, _, err := collectUpstreamStreamCompletions([]byte(`{"model":"gmodel_latest"}`), sa, false, nil)
+		stubChatEndpoint(t, srv.URL)
+		_, _, err := collectUpstreamStreamCompletions("encoded-body", "gmodel_latest", sa, false, nil)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: want error containing %q, got %v", tc.name, tc.want, err)
 		}

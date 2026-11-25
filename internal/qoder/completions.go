@@ -1,21 +1,12 @@
-// completions.go carries the current client chat dialect: an OpenAI-style
-// POST with the model key at the TOP LEVEL. The legacy agent_chat_generation
-// envelope only carried model_config.key, which the service no longer reads —
-// a request without a top-level model is answered by auto (field report
-// 2026-11-25: panel "model mismatch", sent gmodel_latest / received auto).
+// completions.go is the OpenAI-style dialect tried in 0.8.76–0.8.78.
+// Production chat does not use it. /qsvr/chat/completions answers 401 for
+// every path under that prefix, and an empty 404 once a real token gets
+// past that filter, so it is not a chat route. The executor posts the
+// encoded agent_chat_generation body to endpointChatFor (region.go):
+// api3.qoder.sh for intl, gateway.qoder.com.cn for cn.
 //
-// The chat route is /qsvr/chat/completions on the same inference gateway the
-// rest of the plugin already uses (api3.qoder.sh for intl, gateway.qoder.com.cn
-// for cn). An unauthenticated POST there returns 401 TOKEN_INVALID /
-// "missing authorization token", which is the bearer this file attaches.
-//
-// api2-v2.qoder.sh does not resolve, and /model/v1/chat/completions is 404 on
-// api1, api2, api3 and the CN gateway. Sending intl chat there hangs until
-// the HTTP client's context deadline.
-//
-// The body is plain JSON (no QoderEncoding): top-level model, Bearer access
-// token, Accept: text/event-stream, stream_options.include_usage. The reply
-// is ordinary OpenAI SSE. No COSY signature on this path.
+// The helpers below stay so the dialect unit tests still compile. Do not
+// point the executor back at endpointCompletionsFor.
 package qoder
 
 import (

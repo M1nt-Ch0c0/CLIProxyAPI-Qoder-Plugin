@@ -8,7 +8,6 @@ package qoder
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -329,9 +328,9 @@ func streamChunkAnswers(chunk string) bool {
 // its one-shot verdict slot is still untouched by a queue ticket, so the
 // eventual round reports through exactly the same paths as before.
 //
-// unwrap is the dialect's frame decoder (v0.8.76): the completions chat path
-// passes completionsUnwrapFrame (plain OpenAI SSE), the legacy envelope
-// dialect qoderUnwrapFrame. Everything else — gate, queue retry, empty-stream
+// unwrap is the frame decoder. Chat passes qoderUnwrapFrame, the gateway
+// envelope on agent_chat_generation. completionsUnwrapFrame remains for the
+// unused plain-SSE dialect. Everything else — gate, queue retry, empty-stream
 // and truncation guards, cooldown bookkeeping — is dialect-neutral.
 func pumpUpstreamStream(httpReq *http.Request, rebuild func() (*http.Request, error), cancel context.CancelFunc, streamID string, sseFramed bool, unwrap func(string) (string, bool, error), requestedModel, upstreamModel, authUID string, started time.Time, authID, cooldownModel string, gate *streamHeadGate) {
 	// Always close the host stream exactly once on every exit path.
@@ -603,25 +602,28 @@ func pumpUpstreamStream(httpReq *http.Request, rebuild func() (*http.Request, er
 	}
 }
 
-// collectUpstreamStreamCompletions is the synchronous fallback for the
-// completions chat path (no async stream id): drain the plain OpenAI SSE
-// reply and return the chunks as a slice. The collector, when non-nil,
-// observes the chunks for usage extraction.
+// collectUpstreamStreamCompletions is the synchronous fallback when the host
+// does not hand over an async stream id. The name is historical: the body is
+// the encoded agent_chat_generation request, frames go through
+// qoderUnwrapFrame, and the collector, when non-nil, observes chunks for
+// usage extraction.
 //
 // v0.8.64 queue machinery (unchanged): honours the 10605 RESOURCE_LIMIT queue
 // ticket the same way the async pump does — wait retryAfterSeconds and
 // re-issue (the loop below), bounded by queueRetryAllowed. The synchronous
 // path has no request context, so the wait is unconditional; nothing was
 // collected yet on a ticket round, which makes the restart safe.
-func collectUpstreamStreamCompletions(body []byte, sa *storedAuth, sseFramed bool, collector *sseUsageCollector) ([]pluginapi.ExecutorStreamChunk, int, error) {
+func collectUpstreamStreamCompletions(encodedBody, modelKey string, sa *storedAuth, sseFramed bool, collector *sseUsageCollector) ([]pluginapi.ExecutorStreamChunk, int, error) {
 	var waited time.Duration
 	attempt := 0
 	for {
-		httpReq, err := http.NewRequest(http.MethodPost, endpointCompletionsFn(sa), bytes.NewReader(body))
+		httpReq, err := http.NewRequest(http.MethodPost, endpointChatFn(sa), strings.NewReader(encodedBody))
 		if err != nil {
 			return nil, 0, err
 		}
-		applyCompletionsHeaders(httpReq, sa)
+		if err := applyCosyHeaders(httpReq, sa, encodedBody, endpointChatFn(sa), modelKey, true); err != nil {
+			return nil, 0, err
+		}
 		stream, statusCode, _, err := hostHTTPDoStream(httpReq)
 		if err != nil {
 			return nil, 0, fmt.Errorf("http_error: %w", err)
@@ -654,7 +656,7 @@ func collectUpstreamStreamCompletions(body []byte, sa *storedAuth, sseFramed boo
 		sawTerminator := false
 		var frameTerminal error
 		for scanner.Scan() {
-			bodyStr, meaningful, frameErr := completionsUnwrapFrame(scanner.Text())
+			bodyStr, meaningful, frameErr := qoderUnwrapFrame(scanner.Text())
 			if frameErr != nil {
 				frameTerminal = frameErr
 				break

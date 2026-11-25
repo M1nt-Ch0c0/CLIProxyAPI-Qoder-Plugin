@@ -611,9 +611,9 @@ func TestPumpNonQueueFailureStillFailsImmediately(t *testing.T) {
 // --- the synchronous collector (unit level) -----------------------------------
 
 func TestCollectQueueTicketRetryPolicyIntegration(t *testing.T) {
-	// The synchronous collector (collectUpstreamStreamCompletions since
-	// v0.8.76) shares this decision table with the pump. Its HTTP leg is
-	// covered hermetically in completions_test.go via endpointCompletionsFn;
+	// The synchronous collector (collectUpstreamStreamCompletions) shares this
+	// decision table with the pump. Its HTTP leg is covered hermetically in
+	// completions_test.go via endpointChatFn;
 	// what is pinned here is the budget arithmetic its loop consumes: a
 	// detected ticket within budget retries, an exhausted one fails with the
 	// rendered line.

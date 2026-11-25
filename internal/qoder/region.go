@@ -127,6 +127,12 @@ func endpointChatFor(sa *storedAuth) string {
 	return gatewayBaseFor(sa) + "/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1"
 }
 
+// endpointChatFn is the test seam for the chat URL. Production posts the
+// encoded agent_chat_generation body here. /qsvr/chat/completions answers
+// 401 for every path under that prefix and 404 once a real token is accepted,
+// so it is not a chat route.
+var endpointChatFn = endpointChatFor
+
 // inferenceBaseForRegion returns the inference host base for a region. The
 // model catalog is served by the inference host at /api/v2/model/list (no
 // /algo prefix) — the same per-region host the chat gateway rides. Which

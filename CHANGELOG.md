@@ -2,6 +2,10 @@
 
 使用方法见 [README](README.md)。发行包在 [Releases](https://github.com/M1nt-Ch0c0/CLIProxyAPI-Qoder-Plugin/releases)。
 
+## 0.8.79
+
+聊天改回 `agent_chat_generation`。`/qsvr/chat/completions` 在登录之后返回空的 404，那个地址不是聊天接口。国际版仍走 `api3.qoder.sh`，国内版仍走 `gateway.qoder.com.cn`。
+
 ## 0.8.78
 
 国际版聊天改回 `api3.qoder.sh` 上的 `/qsvr/chat/completions`。`0.8.76` 用的 `api2-v2.qoder.sh` 在公网不存在，请求会一直等到超时。国内版地址不变。

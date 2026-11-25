@@ -8,6 +8,7 @@ package qoder
 
 import (
 	"encoding/base64"
+	"fmt"
 	"strings"
 )
 
@@ -49,4 +50,25 @@ func qoderEncode(plain []byte) string {
 		sb.WriteByte(qoderS2C[c])
 	}
 	return sb.String()
+}
+
+// qoderDecode reverses qoderEncode. Tests use it to read the body the
+// executor posts; production never needs the plaintext back.
+func qoderDecode(encoded string) ([]byte, error) {
+	n := len(encoded)
+	stdRearranged := make([]byte, n)
+	for i := 0; i < n; i++ {
+		c := encoded[i]
+		if c >= 128 || qoderC2S[c] == 0 {
+			return nil, fmt.Errorf("qoder decode: invalid byte at %d", i)
+		}
+		stdRearranged[i] = qoderC2S[c]
+	}
+	a := n / 3
+	std := make([]byte, n)
+	// encode did std[n-a:] + std[a:n-a] + std[:a]
+	copy(std[:a], stdRearranged[n-a:])
+	copy(std[a:n-a], stdRearranged[a:n-a])
+	copy(std[n-a:], stdRearranged[:a])
+	return base64.StdEncoding.DecodeString(string(std))
 }

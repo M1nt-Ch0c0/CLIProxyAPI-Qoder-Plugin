@@ -4,7 +4,6 @@
 package qoder
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -212,7 +211,7 @@ type registrationCapability struct {
 // version is the plugin's reported version. The c-shared shell owns the
 // ldflags target (-X main.version, kept in lockstep with the VERSION file)
 // and copies it in via SetBuild. This literal is the fallback for tests.
-var version = "0.8.78"
+var version = "0.8.79"
 
 // providerName is the registered plugin id. The unified default is "qoder";
 // split-channel builds rename it with -X main.providerName=qoder-intl, which
@@ -628,20 +627,17 @@ func handleExecExecute(raw []byte) ([]byte, error) {
 	if sa.Account.UID != "" {
 		authUID = sa.Account.UID
 	}
-	// v0.8.76: build the OpenAI-style completions body with the model key at
-	// the TOP LEVEL (see completions.go). The legacy agent_chat_generation
-	// envelope only carried model_config.key, which the service no longer
-	// reads — requests without a top-level model are answered by auto.
 	qwReq := &openAIRequest{}
 	if err := json.Unmarshal(req.Payload, qwReq); err != nil && len(req.Payload) > 0 {
 		publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, 0, "payload parse: "+err.Error())
 		return nil, fmt.Errorf("payload parse: %w", err)
 	}
-	body, err := buildCompletionsBody(qwReq, upstreamModel)
+	body, err := buildQoderBody(qwReq, upstreamModel, uiUserType(nil))
 	if err != nil {
 		publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, 0, "body build: "+err.Error())
 		return nil, fmt.Errorf("body build: %w", err)
 	}
+	encodedBody := qoderEncode(body)
 	// v0.8.64: honour the 10605 RESOURCE_LIMIT queue ticket — wait
 	// retryAfterSeconds and re-issue the request, bounded by
 	// queueRetryAllowed (see queue_retry.go). The ticket can arrive as the
@@ -650,11 +646,14 @@ func handleExecExecute(raw []byte) ([]byte, error) {
 	// invisible to the caller.
 	var queueWaited time.Duration
 	for attempt := 0; ; attempt++ {
-		httpReq, err := http.NewRequest(http.MethodPost, endpointCompletionsFn(sa), bytes.NewReader(body))
+		httpReq, err := http.NewRequest(http.MethodPost, endpointChatFn(sa), strings.NewReader(encodedBody))
 		if err != nil {
 			return nil, err
 		}
-		applyCompletionsHeaders(httpReq, sa)
+		if err := applyCosyHeaders(httpReq, sa, encodedBody, endpointChatFn(sa), upstreamModel, true); err != nil {
+			publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, 0, err.Error())
+			return nil, err
+		}
 		// Compliance: route via host.http.do_stream so request-log captures the
 		// outbound call. Read entire body via the bridge, then fold SSE → completion.
 		stream, statusCode, _, err := hostHTTPDoStream(httpReq)
@@ -689,7 +688,7 @@ func handleExecExecute(raw []byte) ([]byte, error) {
 			// cooldown layer stops re-picking a drained credential.
 			return nil, upstreamStatusError(statusCode, errOut)
 		}
-		completion, err := aggregateCompletionsSSE(newHostStreamReader(stream), req.Model)
+		completion, err := aggregateQoderSSE(newHostStreamReader(stream), req.Model)
 		stream.Close()
 		if err != nil {
 			var fe *qoderFrameError
@@ -748,7 +747,6 @@ func handleExecStream(raw []byte) ([]byte, error) {
 		authUID = sa.Account.UID
 	}
 
-	// v0.8.76: OpenAI-style completions body, top-level model (completions.go).
 	bodyRaw := req.Payload
 	if len(bodyRaw) == 0 {
 		bodyRaw = req.OriginalRequest
@@ -758,11 +756,12 @@ func handleExecStream(raw []byte) ([]byte, error) {
 		publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, 0, "payload parse: "+err.Error())
 		return nil, fmt.Errorf("payload parse: %w", err)
 	}
-	body, err := buildCompletionsBody(qwReq, upstreamModel)
+	body, err := buildQoderBody(qwReq, upstreamModel, uiUserType(nil))
 	if err != nil {
 		publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, 0, "body build: "+err.Error())
 		return nil, fmt.Errorf("body build: %w", err)
 	}
+	encodedBody := qoderEncode(body)
 
 	headers := streamHeaders()
 	sseFramed := clientNeedsSSEFrame(req.Metadata)
@@ -770,7 +769,7 @@ func handleExecStream(raw []byte) ([]byte, error) {
 	// No async stream id → fall back to synchronous chunk collection.
 	if req.StreamID == "" {
 		collector := &sseUsageCollector{}
-		chunks, statusCode, errCollect := collectUpstreamStreamCompletions(body, sa, sseFramed, collector)
+		chunks, statusCode, errCollect := collectUpstreamStreamCompletions(encodedBody, upstreamModel, sa, sseFramed, collector)
 		if errCollect != nil {
 			publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, statusCode, errCollect.Error())
 			recordUpstreamFailure(req.AuthID, cooldownModel, statusCode, errCollect.Error())
@@ -792,21 +791,28 @@ func handleExecStream(raw []byte) ([]byte, error) {
 	// headers carry per-round request ids, so every round needs a freshly
 	// minted request.
 	rebuildQueueRequest := func() (*http.Request, error) {
-		retryReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointCompletionsFn(sa), bytes.NewReader(body))
+		retryReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointChatFn(sa), strings.NewReader(encodedBody))
 		if err != nil {
 			return nil, err
 		}
-		applyCompletionsHeaders(retryReq, sa)
+		if err := applyCosyHeaders(retryReq, sa, encodedBody, endpointChatFn(sa), upstreamModel, true); err != nil {
+			return nil, err
+		}
 		return retryReq, nil
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointCompletionsFn(sa), bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointChatFn(sa), strings.NewReader(encodedBody))
 	if err != nil {
 		cancel()
 		streamEmitError(req.StreamID, err.Error())
 		streamClose(req.StreamID)
 		return okEnvelope(streamResponse{Headers: headers})
 	}
-	applyCompletionsHeaders(httpReq, sa)
+	if err := applyCosyHeaders(httpReq, sa, encodedBody, endpointChatFn(sa), upstreamModel, true); err != nil {
+		cancel()
+		streamEmitError(req.StreamID, err.Error())
+		streamClose(req.StreamID)
+		return okEnvelope(streamResponse{Headers: headers})
+	}
 	// v0.12.85 opt-in stream head gate (config `stream_head_timeout`, seconds).
 	// The pump reads the opening frames while the hand-off waits for its
 	// verdict, so a failure that lands before the model starts answering still
@@ -815,7 +821,7 @@ func handleExecStream(raw []byte) ([]byte, error) {
 	// hand-off: the pump owns the verdict channel and never blocks on us.
 	headTimeout := streamHeadTimeout()
 	gate := newStreamHeadGate(headTimeout)
-	go pumpUpstreamStream(httpReq, rebuildQueueRequest, cancel, req.StreamID, sseFramed, completionsUnwrapFrame, req.Model, upstreamModel, authUID, started, req.AuthID, cooldownModel, gate)
+	go pumpUpstreamStream(httpReq, rebuildQueueRequest, cancel, req.StreamID, sseFramed, qoderUnwrapFrame, req.Model, upstreamModel, authUID, started, req.AuthID, cooldownModel, gate)
 	if verdict, decided := gate.awaitHandoff(headTimeout); decided && verdict.err != nil {
 		// Nothing was delivered, so the host can rotate/cool on a real status
 		// instead of accepting a successful-looking empty answer. The status is
