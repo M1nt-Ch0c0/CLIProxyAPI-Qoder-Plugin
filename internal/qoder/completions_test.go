@@ -16,6 +16,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
@@ -360,8 +361,9 @@ func TestQoderEncodeRoundTrip(t *testing.T) {
 }
 
 // TestExecutePostsAgentChatAndFoldsReply: "glm-5.4" leaves as
-// model_config.key gmodel_latest on agent_chat_generation, and the folded
-// completion carries the model from the upstream chunks.
+// model_config.key gmodel_latest on agent_chat_generation. The folded
+// completion reports the CPA alias glm-5.4, not the catalog key and not
+// whatever the chunk labeled itself.
 func TestExecutePostsAgentChatAndFoldsReply(t *testing.T) {
 	srv, cap := completionsCaptureServer(t, http.StatusOK, completionsSSEBody("gmodel_latest", "hello"))
 	stubChatEndpoint(t, agentChatURL(srv.URL))
@@ -391,8 +393,8 @@ func TestExecutePostsAgentChatAndFoldsReply(t *testing.T) {
 	if err := json.Unmarshal(resp.Payload, &completion); err != nil {
 		t.Fatal(err)
 	}
-	if completion["model"] != "gmodel_latest" {
-		t.Fatalf("the reply model must be gmodel_latest, got %v", completion["model"])
+	if completion["model"] != "glm-5.4" {
+		t.Fatalf("the reply model must be the CPA alias glm-5.4, got %v", completion["model"])
 	}
 	if !strings.Contains(string(resp.Payload), `"content":"hello"`) {
 		t.Fatalf("answer not folded: %s", resp.Payload)
@@ -412,6 +414,69 @@ func TestExecutePostsAgentChatAndFoldsReply(t *testing.T) {
 	if sent["stream"] != true {
 		t.Fatalf("outbound stream = %v, want true", sent["stream"])
 	}
+}
+
+func TestExecuteUsesCatalogDisplayName(t *testing.T) {
+	sa := &storedAuth{
+		Auth:    storedTokens{AccessToken: "dt-test-token-glm99", Region: "intl"},
+		Account: storedAccount{UID: "uid-glm99"},
+	}
+	dynamicModelsCache.Lock()
+	prevModels, prevFetched, prevKey := dynamicModelsCache.models, dynamicModelsCache.fetched, dynamicModelsCache.accountKey
+	dynamicModelsCache.models = []pluginapi.ModelInfo{{ID: "gmodel_latest", Name: "GLM-9.9"}}
+	dynamicModelsCache.fetched = time.Now()
+	dynamicModelsCache.accountKey = modelCatalogAccountKey(sa)
+	dynamicModelsCache.Unlock()
+	t.Cleanup(func() {
+		dynamicModelsCache.Lock()
+		dynamicModelsCache.models, dynamicModelsCache.fetched, dynamicModelsCache.accountKey = prevModels, prevFetched, prevKey
+		dynamicModelsCache.Unlock()
+	})
+
+	srv, cap := completionsCaptureServer(t, http.StatusOK, completionsSSEBody("auto", "hello"))
+	stubChatEndpoint(t, agentChatURL(srv.URL))
+	storage, err := json.Marshal(sa)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := pluginapi.ExecutorRequest{
+		Model:       "GLM-9.9",
+		Payload:     []byte(`{"model":"GLM-9.9","messages":[{"role":"user","content":"hi"}],"stream":false}`),
+		StorageJSON: storage,
+	}
+	raw, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := handleExecExecute(raw)
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	var env envelope
+	if err := json.Unmarshal(out, &env); err != nil || !env.OK {
+		t.Fatalf("envelope: %s err=%v", out, err)
+	}
+	var resp pluginapi.ExecutorResponse
+	if err := json.Unmarshal(env.Result, &resp); err != nil {
+		t.Fatal(err)
+	}
+	var completion map[string]any
+	if err := json.Unmarshal(resp.Payload, &completion); err != nil {
+		t.Fatal(err)
+	}
+	if completion["model"] != "glm-9.9" {
+		t.Fatalf("reply model = %v, want glm-9.9", completion["model"])
+	}
+	_, _, header, body := cap.snapshot()
+	sent := decodeCapturedAgentBody(t, body)
+	plain, err := json.Marshal(sent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.ToLower(string(plain)), "glm-9.9") {
+		t.Fatalf("upstream body carried the display name: %s", plain)
+	}
+	assertAgentModel(t, sent, header)
 }
 
 func TestExecuteRejectsErrorFrame(t *testing.T) {
@@ -468,6 +533,12 @@ func TestStreamSyncPathPostsAgentChat(t *testing.T) {
 	if !strings.Contains(joined, "hello") {
 		t.Fatalf("answer missing from chunks: %s", joined)
 	}
+	if !strings.Contains(joined, `"model":"glm-5.4"`) {
+		t.Fatalf("streamed chunks must report the CPA alias, got %s", joined)
+	}
+	if strings.Contains(joined, `"model":"gmodel_latest"`) {
+		t.Fatalf("streamed chunks kept the catalog key: %s", joined)
+	}
 	_, path, header, body := cap.snapshot()
 	if !strings.Contains(path, "/algo/api/v2/service/pro/sse/agent_chat_generation") {
 		t.Fatalf("CN must ride agent_chat_generation, got %s", path)
@@ -506,10 +577,15 @@ func TestStreamAsyncPathDeliversChunks(t *testing.T) {
 	if len(delivered) < 3 {
 		t.Fatalf("expected the answer chunks, got %q", delivered)
 	}
+	joined := ""
 	for _, payload := range delivered {
 		if !strings.HasPrefix(payload, "data: ") {
 			t.Fatalf("cross-format entry must self-frame chunks, got %q", payload)
 		}
+		joined += payload
+	}
+	if !strings.Contains(joined, `"model":"glm-5.4"`) || strings.Contains(joined, `"model":"gmodel_latest"`) {
+		t.Fatalf("async chunks must report the CPA alias, got %s", joined)
 	}
 	_, _, header, body := cap.snapshot()
 	assertAgentModel(t, decodeCapturedAgentBody(t, body), header)
@@ -533,7 +609,7 @@ func TestCollectCompletionsQueueRetryThenSucceeds(t *testing.T) {
 
 	sa := &storedAuth{Auth: storedTokens{AccessToken: "dt-test-token", Region: "intl"}}
 	collector := &sseUsageCollector{}
-	chunks, statusCode, err := collectUpstreamStreamCompletions([]byte(`{"model_config":{"key":"gmodel_latest"}}`), "gmodel_latest", sa, false, collector)
+	chunks, statusCode, err := collectUpstreamStreamCompletions([]byte(`{"model_config":{"key":"gmodel_latest"}}`), "gmodel_latest", sa, false, collector, "")
 	if err != nil || statusCode != 0 {
 		t.Fatalf("the retried round must succeed: status=%d err=%v", statusCode, err)
 	}
@@ -562,7 +638,7 @@ func TestCollectCompletionsGuards(t *testing.T) {
 	for _, tc := range cases {
 		srv, _ := completionsCaptureServer(t, http.StatusOK, tc.reply)
 		stubChatEndpoint(t, srv.URL)
-		_, _, err := collectUpstreamStreamCompletions([]byte(`{"model_config":{"key":"gmodel_latest"}}`), "gmodel_latest", sa, false, nil)
+		_, _, err := collectUpstreamStreamCompletions([]byte(`{"model_config":{"key":"gmodel_latest"}}`), "gmodel_latest", sa, false, nil, "")
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: want error containing %q, got %v", tc.name, tc.want, err)
 		}

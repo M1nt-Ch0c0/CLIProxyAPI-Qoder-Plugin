@@ -148,6 +148,10 @@ func TestBuildQoderBodySlimPassthrough(t *testing.T) {
 	if v, _ := mc["is_reasoning"].(bool); !v {
 		t.Error("slim mode lost is_reasoning=true")
 	}
+	biz, _ := m["business"].(map[string]any)
+	if v, _ := biz["model_key"].(string); v != "qfmodel" {
+		t.Errorf("business.model_key = %q, want qfmodel", v)
+	}
 }
 
 func TestBuildQoderBodyClientToolsOverride(t *testing.T) {

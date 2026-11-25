@@ -226,6 +226,44 @@ func filterCoolingModels(sa *storedAuth, models []pluginapi.ModelInfo) []plugina
 // for_auth chain without the network. Production always uses callModelsAPI.
 var callModelsAPIFn = callModelsAPI
 
+// fetchCatalogForChat is false in hermetic tests so a chat does not dial the
+// catalog. Production leaves it true: a cold cache fetches this account's list.
+var fetchCatalogForChat = true
+
+// namesForChat resolves display names for one chat. A list fetched for this
+// account wins for five minutes; a saved snapshot is next; wbModels() is last.
+func namesForChat(sa *storedAuth, storageJSON []byte) catalogNames {
+	return namesFromModels(modelsForChat(sa, storageJSON))
+}
+
+func modelsForChat(sa *storedAuth, storageJSON []byte) []pluginapi.ModelInfo {
+	if sa == nil {
+		return wbModels()
+	}
+	key := modelCatalogAccountKey(sa)
+	if models, ok := cachedDynamicModels(key); ok {
+		return models
+	}
+	region := authRegion(sa)
+	if fetchCatalogForChat {
+		if dyn, err := callModelsAPIFn(sa); err == nil && len(dyn) > 0 {
+			storeDynamicModels(key, dyn)
+			return dyn
+		}
+	}
+	if snap, ok := persistedSnapshotForStorage(storageJSON, region); ok {
+		return snap
+	}
+	return wbModels()
+}
+
+func resolveChatModel(sa *storedAuth, storageJSON []byte, requested string) (upstream, alias string) {
+	names := namesForChat(sa, storageJSON)
+	upstream = names.upstream(stripProviderPrefix(requested))
+	alias = names.alias(upstream)
+	return upstream, alias
+}
+
 // callModelsAPI GETs /algo/api/v2/model/list?Encode=1 from the account's
 // inference host with COSY signing (same as inference). The desktop
 // models.list interceptor always adds Encode=1; the request log drops the

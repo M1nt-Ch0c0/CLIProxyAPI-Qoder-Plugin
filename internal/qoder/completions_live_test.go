@@ -35,7 +35,31 @@ func TestLiveAgentChat(t *testing.T) {
 		requested = "gmodel_latest"
 	}
 	upstream := cpaToUpstreamKey(stripProviderPrefix(requested))
-	t.Logf("=== live agent chat via executor, region=%s model=%s→%s ===", authRegion(sa), requested, upstream)
+	catalog, err := callModelsAPI(sa)
+	if err != nil {
+		t.Fatalf("catalog: %v", err)
+	}
+	display := ""
+	for _, m := range catalog {
+		if m.ID == upstream {
+			display = m.Name
+		}
+	}
+	if display == "" {
+		t.Fatalf("catalog has no %s", upstream)
+	}
+	alias := strings.ToLower(display)
+	storeDynamicModels(modelCatalogAccountKey(sa), catalog)
+	t.Cleanup(func() {
+		dynamicModelsCache.Lock()
+		if dynamicModelsCache.accountKey == modelCatalogAccountKey(sa) {
+			dynamicModelsCache.models = nil
+			dynamicModelsCache.accountKey = ""
+			dynamicModelsCache.fetched = time.Time{}
+		}
+		dynamicModelsCache.Unlock()
+	})
+	t.Logf("=== live agent chat via executor, region=%s model=%s→%s display=%s alias=%s ===", authRegion(sa), requested, upstream, display, alias)
 	storage, err := json.Marshal(sa)
 	if err != nil {
 		t.Fatal(err)
@@ -48,10 +72,13 @@ func TestLiveAgentChat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var rawModels []string
+	observeChunkModel = func(m string) { rawModels = append(rawModels, m) }
+	t.Cleanup(func() { observeChunkModel = nil })
 	start := time.Now()
 	out, err := handleExecExecute(raw)
 	if err != nil {
-		t.Fatalf("execute: %v (after %s)", err, time.Since(start).Truncate(time.Millisecond))
+		t.Fatalf("execute: %v (after %s) http=%d", err, time.Since(start).Truncate(time.Millisecond), observedChatStatus)
 	}
 	var env envelope
 	if err := json.Unmarshal(out, &env); err != nil || !env.OK {
@@ -75,9 +102,21 @@ func TestLiveAgentChat(t *testing.T) {
 			text, _ = message["reasoning_content"].(string)
 		}
 	}
-	t.Logf("[agent] http 200 after %s folded model=%v text_len=%d", time.Since(start).Truncate(time.Millisecond), folded["model"], len(text))
-	if folded["model"] != upstream {
-		t.Fatalf("folded model = %v, want %s", folded["model"], upstream)
+	seen := map[string]int{}
+	var order []string
+	for _, m := range rawModels {
+		if seen[m] == 0 {
+			order = append(order, m)
+		}
+		seen[m]++
+	}
+	foldedModel, _ := folded["model"].(string)
+	t.Logf("[agent] http %d after %s raw_chunk_model=%v counts=%v folded_model=%s text_len=%d", observedChatStatus, time.Since(start).Truncate(time.Millisecond), order, seen, foldedModel, len(text))
+	if observedChatStatus != 200 {
+		t.Fatalf("http status = %d, want 200", observedChatStatus)
+	}
+	if foldedModel != alias {
+		t.Fatalf("folded model = %q, want %s (raw chunks %v)", foldedModel, alias, order)
 	}
 	if strings.TrimSpace(text) == "" {
 		t.Fatal("assistant text is empty")

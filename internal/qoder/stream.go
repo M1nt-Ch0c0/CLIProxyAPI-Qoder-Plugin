@@ -500,7 +500,7 @@ func pumpUpstreamStream(httpReq *http.Request, rebuild func() (*http.Request, er
 					sawFinish = true
 				}
 				collector.feed(bodyStr)
-				cleaned := labelCatalogModel(cleanChunkJSON(bodyStr), upstreamModel)
+				cleaned := labelChunkForCPA(cleanChunkJSON(bodyStr), upstreamModel, replyAliasFrom(httpReq.Context()))
 				if cleaned == "" {
 					continue
 				}
@@ -613,7 +613,7 @@ func pumpUpstreamStream(httpReq *http.Request, rebuild func() (*http.Request, er
 // re-issue (the loop below), bounded by queueRetryAllowed. The synchronous
 // path has no request context, so the wait is unconditional; nothing was
 // collected yet on a ticket round, which makes the restart safe.
-func collectUpstreamStreamCompletions(plainBody []byte, modelKey string, sa *storedAuth, sseFramed bool, collector *sseUsageCollector) ([]pluginapi.ExecutorStreamChunk, int, error) {
+func collectUpstreamStreamCompletions(plainBody []byte, modelKey string, sa *storedAuth, sseFramed bool, collector *sseUsageCollector, replyAlias string) ([]pluginapi.ExecutorStreamChunk, int, error) {
 	var waited time.Duration
 	attempt := 0
 	for {
@@ -672,7 +672,7 @@ func collectUpstreamStreamCompletions(plainBody []byte, modelKey string, sa *sto
 			if collector != nil {
 				collector.feed(bodyStr)
 			}
-			cleaned := cleanChunkJSON(bodyStr)
+			cleaned := labelChunkForCPA(cleanChunkJSON(bodyStr), modelKey, replyAlias)
 			if cleaned == "" {
 				continue
 			}
@@ -727,6 +727,73 @@ func clientNeedsSSEFrame(metadata map[string]any) bool {
 	default:
 		return true
 	}
+}
+
+type replyAliasCtxKey struct{}
+
+func withReplyAlias(ctx context.Context, alias string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, replyAliasCtxKey{}, alias)
+}
+
+func replyAliasFrom(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	alias, _ := ctx.Value(replyAliasCtxKey{}).(string)
+	return alias
+}
+
+// reportedModel is the model name CPA sees. Gateway chunks say "auto", or
+// sometimes echo the catalog key. Either becomes the reply alias, which is
+// the catalog display name in lower case. An empty alias uses the static
+// table. A different gateway label is kept.
+func reportedModel(chunkModel, upstreamKey, alias string) string {
+	if alias == "" {
+		alias = cpaAliasForUpstream(upstreamKey)
+	}
+	if chunkModel == "" || strings.EqualFold(chunkModel, "auto") || chunkModel == upstreamKey || strings.EqualFold(chunkModel, alias) {
+		return alias
+	}
+	return chunkModel
+}
+
+// labelChunkForCPA rewrites an existing chunk "model" field to the CPA alias.
+// Chunks with no model field are left byte-for-byte so control frames stay put.
+// An empty alias uses the static table.
+func labelChunkForCPA(chunkJSON, upstreamKey, alias string) string {
+	if chunkJSON == "" {
+		return ""
+	}
+	var obj map[string]json.RawMessage
+	if json.Unmarshal([]byte(chunkJSON), &obj) != nil {
+		return chunkJSON
+	}
+	raw, ok := obj["model"]
+	if !ok {
+		return chunkJSON
+	}
+	var model string
+	if json.Unmarshal(raw, &model) != nil {
+		return chunkJSON
+	}
+	reported := reportedModel(model, upstreamKey, alias)
+	if reported == model {
+		return chunkJSON
+	}
+	encoded, err := json.Marshal(reported)
+	if err != nil {
+		return chunkJSON
+	}
+	for _, gap := range []string{"", " "} {
+		needle := `"model":` + gap + string(raw)
+		if strings.Contains(chunkJSON, needle) {
+			return strings.Replace(chunkJSON, needle, `"model":`+gap+string(encoded), 1)
+		}
+	}
+	return chunkJSON
 }
 
 // cleanChunkJSON strips only the known-problematic empty tool-call shells
@@ -861,7 +928,7 @@ func chunkCarriesFinish(s string) bool {
 	return false
 }
 
-func aggregateCompletion(r io.Reader, model string) ([]byte, error) {
+func aggregateCompletion(r io.Reader, model, alias string) ([]byte, error) {
 	var content, reasoning, role, respModel, respID, finish string
 	var created int64
 	var usage map[string]any
@@ -889,6 +956,9 @@ func aggregateCompletion(r io.Reader, model string) ([]byte, error) {
 		}
 		if v, ok := chunk["model"].(string); ok && v != "" {
 			respModel = v
+			if observeChunkModel != nil {
+				observeChunkModel(v)
+			}
 		}
 		if v, ok := chunk["created"].(float64); ok {
 			created = int64(v)
@@ -964,7 +1034,7 @@ func aggregateCompletion(r io.Reader, model string) ([]byte, error) {
 		"id":      firstNonEmpty(respID, "chatcmpl-qoderwork"),
 		"object":  "chat.completion",
 		"created": created,
-		"model":   firstNonEmpty(catalogModel(respModel, model), model),
+		"model":   reportedModel(respModel, model, alias),
 		"choices": []map[string]any{{
 			"index":         0,
 			"message":       message,
@@ -996,14 +1066,18 @@ func aggregateCompletion(r io.Reader, model string) ([]byte, error) {
 // ({"firstTokenDuration":N,"totalDuration":N,"serverDuration":N}), which
 // qoderUnwrapFrame swallows as a control line.
 func aggregateQoderSSE(r io.Reader, model string) ([]byte, error) {
-	return aggregateUnwrappedSSE(r, model, qoderUnwrapFrame)
+	return aggregateQoderSSEAlias(r, model, "")
+}
+
+func aggregateQoderSSEAlias(r io.Reader, model, alias string) ([]byte, error) {
+	return aggregateUnwrappedSSE(r, model, alias, qoderUnwrapFrame)
 }
 
 // aggregateUnwrappedSSE is the dialect-neutral fold: run every SSE line
 // through the caller's frame decoder, then aggregate the surviving chunks
 // with aggregateCompletion. The decoder owns the dialect (legacy envelope
 // unwrap vs plain completions SSE); the guards below are shared.
-func aggregateUnwrappedSSE(r io.Reader, model string, unwrap func(string) (string, bool, error)) ([]byte, error) {
+func aggregateUnwrappedSSE(r io.Reader, model, alias string, unwrap func(string) (string, bool, error)) ([]byte, error) {
 	// Unwrap the SSE into an inner plain-text stream of OpenAI chunks,
 	// then delegate to aggregateCompletion. We materialise the inner stream
 	// into memory because the upstream SSE is short-lived (one chat call)
@@ -1043,7 +1117,7 @@ func aggregateUnwrappedSSE(r io.Reader, model string, unwrap func(string) (strin
 	if !seenPayload {
 		return nil, emptyStreamError()
 	}
-	return aggregateCompletion(strings.NewReader(inner.String()), model)
+	return aggregateCompletion(strings.NewReader(inner.String()), model, alias)
 }
 
 // mergeToolCallDelta folds one streaming tool_call fragment into the merged
@@ -1286,22 +1360,13 @@ func pricingURLFromMessage(message string) string {
 	return ""
 }
 
-// catalogModel drops the gateway's generic "auto" label so the fold reports
-// the catalog key that was prepared for the request. The gateway writes
-// "auto" on every successful agent chat even when the key changed the reply.
-func catalogModel(got, requested string) string {
-	if got == "" || (got == "auto" && requested != "" && requested != "auto") {
-		return ""
-	}
-	return got
-}
+// observeChunkModel, when set, receives each SSE chunk's model string as the
+// gateway sent it.
+var observeChunkModel func(string)
 
-func labelCatalogModel(chunk, key string) string {
-	if key == "" || key == "auto" || !strings.Contains(chunk, `"model":"auto"`) {
-		return chunk
-	}
-	return strings.ReplaceAll(chunk, `"model":"auto"`, `"model":"`+key+`"`)
-}
+// observedChatStatus is the HTTP status of the last chat POST whose body
+// was folded. Live tests read it; the executor does not branch on it.
+var observedChatStatus int
 
 func firstNonEmpty(vals ...string) string {
 	for _, v := range vals {

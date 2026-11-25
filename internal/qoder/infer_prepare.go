@@ -70,6 +70,15 @@ func prepareInferChat(sa *storedAuth, body []byte, modelKey string) (*http.Reque
 	for k, v := range prep.Headers {
 		req.Header.Set(k, v)
 	}
+	// Desktop paid-model retry. Does not change the chunk model field.
+	if modelKey != "" && modelKey != "auto" {
+		req.Header.Set("Cosy-Paid-Confirmed", "true")
+	}
+	// Desktop injectClientIdentityHeaders sets Cosy-MachineOS on every infer
+	// call. The wasm signer does not.
+	if req.Header.Get("Cosy-MachineOS") == "" {
+		req.Header.Set("Cosy-MachineOS", simulatedMachineOS())
+	}
 	return req, nil
 }
 

@@ -36,6 +36,46 @@ func TestAggregateQoderSSERejectsEmptyStream(t *testing.T) {
 	}
 }
 
+func TestAggregateQoderSSEReportsCPAAlias(t *testing.T) {
+	for _, chunkModel := range []string{"auto", "gmodel_latest"} {
+		input := strings.Join([]string{
+			`data:{"statusCodeValue":200,"body":"{\"id\":\"q1\",\"model\":\"` + chunkModel + `\",\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}"}`,
+			`data:{"body":"[DONE]"}`,
+			"",
+		}, "\n")
+		out, err := aggregateQoderSSE(strings.NewReader(input), "gmodel_latest")
+		if err != nil {
+			t.Fatalf("chunk %s: unexpected error: %v", chunkModel, err)
+		}
+		if !strings.Contains(string(out), `"model":"glm-5.4"`) {
+			t.Fatalf("chunk %s: CPA alias missing, got %s", chunkModel, out)
+		}
+		if strings.Contains(string(out), `"model":"gmodel_latest"`) || strings.Contains(string(out), `"model":"auto"`) {
+			t.Fatalf("chunk %s: fold kept a name CPA does not ask for: %s", chunkModel, out)
+		}
+	}
+	foreign := strings.Join([]string{
+		`data:{"statusCodeValue":200,"body":"{\"id\":\"q1\",\"model\":\"other-model\",\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}"}`,
+		`data:{"body":"[DONE]"}`,
+		"",
+	}, "\n")
+	out, err := aggregateQoderSSE(strings.NewReader(foreign), "gmodel_latest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"model":"other-model"`) {
+		t.Fatalf("a gateway label other than auto or the catalog key must be kept, got %s", out)
+	}
+	chunk := `{"id":"c1","model":"auto","choices":[{"delta":{"content":"你好"}}]}`
+	labeled := labelChunkForCPA(chunk, "gmodel_latest", "")
+	if !strings.Contains(labeled, `"model":"glm-5.4"`) || !strings.Contains(labeled, "你好") {
+		t.Fatalf("stream chunk = %s", labeled)
+	}
+	if labelChunkForCPA(`{"choices":[{"delta":{"content":"x"}}]}`, "gmodel_latest", "") != `{"choices":[{"delta":{"content":"x"}}]}` {
+		t.Fatal("a chunk with no model field must stay byte-for-byte")
+	}
+}
+
 func TestAggregateQoderSSEFoldsNormalChunks(t *testing.T) {
 	input := strings.Join([]string{
 		"data:{\"statusCodeValue\":200,\"body\":\"{\\\"id\\\":\\\"q1\\\",\\\"model\\\":\\\"glm-4.6\\\",\\\"choices\\\":[{\\\"delta\\\":{\\\"role\\\":\\\"assistant\\\",\\\"content\\\":\\\"he\\\"}}]}\",\"headers\":{}}",

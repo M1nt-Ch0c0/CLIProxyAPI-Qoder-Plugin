@@ -112,5 +112,5 @@ func completionsUnwrapFrame(line string) (string, bool, error) {
 // error-frame and empty-stream guards aggregateQoderSSE applies to the legacy
 // envelope stream.
 func aggregateCompletionsSSE(r io.Reader, model string) ([]byte, error) {
-	return aggregateUnwrappedSSE(r, model, completionsUnwrapFrame)
+	return aggregateUnwrappedSSE(r, model, "", completionsUnwrapFrame)
 }

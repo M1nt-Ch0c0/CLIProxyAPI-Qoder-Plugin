@@ -22,6 +22,12 @@ func TestPrepareInferUsesCatalogKey(t *testing.T) {
 	if got := req.Header.Get("X-Model-Key"); got != "gmodel_latest" {
 		t.Fatalf("X-Model-Key %q", got)
 	}
+	if got := req.Header.Get("Cosy-Paid-Confirmed"); got != "true" {
+		t.Fatalf("Cosy-Paid-Confirmed %q", got)
+	}
+	if got := req.Header.Get("Cosy-MachineOS"); got != "x86_64_win32" {
+		t.Fatalf("Cosy-MachineOS %q", got)
+	}
 	raw, _ := io.ReadAll(req.Body)
 	plain, err := qoderDecode(string(raw))
 	if err != nil {
@@ -33,7 +39,11 @@ func TestPrepareInferUsesCatalogKey(t *testing.T) {
 	if strings.Contains(string(plain), "glm-5") || strings.Contains(string(plain), "GLM-5.4") {
 		t.Fatalf("display name leaked: %s", plain)
 	}
-	t.Logf("prepared path=%s query=%s X-Model-Key=%s body_has_gmodel_latest=%v body_has_glm-5=%v",
-		req.URL.Path, req.URL.RawQuery, req.Header.Get("X-Model-Key"),
+	var names []string
+	for k := range req.Header {
+		names = append(names, k)
+	}
+	t.Logf("prepared path=%s query=%s X-Model-Key=%s X-Model-Source=%s headers=%v body_has_gmodel_latest=%v body_has_glm-5=%v",
+		req.URL.Path, req.URL.RawQuery, req.Header.Get("X-Model-Key"), req.Header.Get("X-Model-Source"), names,
 		strings.Contains(string(plain), `"key":"gmodel_latest"`), strings.Contains(string(plain), "glm-5"))
 }

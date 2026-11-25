@@ -43,6 +43,7 @@ import (
 func TestMain(m *testing.M) {
 	if os.Getenv("QD_TOKEN") == "" {
 		os.Setenv("QD_UMID_AUTO", "0")
+		fetchCatalogForChat = false
 		dailyWindowNow = func() time.Time {
 			return time.Date(2026, 10, 12, 11, 0, 0, 0, time.FixedZone("UTC+8", 8*3600))
 		}

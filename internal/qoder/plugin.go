@@ -210,7 +210,7 @@ type registrationCapability struct {
 // version is the plugin's reported version. The c-shared shell owns the
 // ldflags target (-X main.version, kept in lockstep with the VERSION file)
 // and copies it in via SetBuild. This literal is the fallback for tests.
-var version = "0.8.82"
+var version = "0.8.83"
 
 // providerName is the registered plugin id. The unified default is "qoder";
 // split-channel builds rename it with -X main.providerName=qoder-intl, which
@@ -227,17 +227,17 @@ func wbRegistration() registration {
 			GitHubRepository: "https://github.com/M1nt-Ch0c0/CLIProxyAPI-Qoder-Plugin",
 			Logo:             pluginLogoURL,
 			ConfigFields: []pluginapi.ConfigField{
-				{Name: "queue_wait_budget", Type: pluginapi.ConfigFieldTypeString, Description: "Cumulative queue-ticket wait per execution, 0–150 integer seconds (default 150). 0 disables queue retries. Does not limit network or generation time."},
-				{Name: "checkin_auto", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Enable daily auto check-in: window-anchored 10:05 UTC+8 (round-open timezone, works in any container TZ) plus 10:00/15:00/21:00 local compensation ticks (default true)."},
-				{Name: "login_region", Type: pluginapi.ConfigFieldTypeEnum, EnumValues: []string{regionCN, regionIntl}, Description: "Region for NEW logins: cn (qoder.cn, default) or intl (qoder.com). Existing accounts keep their own region; legacy qoder-cn-/qoder-intl- auth files are adopted automatically."},
-				{Name: "login_dialect", Type: pluginapi.ConfigFieldTypeEnum, EnumValues: []string{loginDialectCockpit, loginDialectDesktop}, Description: "DEPRECATED since v0.8.45 (no-op). Both CN and Intl now always use the official desktop-client v0.4.3 wire format (client_id 732aef47-… + machine identity + /users/sign-in?biz_variant=qoder wrapper) — the official first-login newbie grant (14-day Pro trial + 300 credits) fires server-side on every login. The config key is kept for backward compat only; both values produce the same URL."},
-				{Name: "claim_unverified", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Opt-in (default false): when true, the Pro-claim flow may claim a CLAIMABLE campaigns row whose reward face value could not be verified (unreadable or absent) instead of only reporting it. Rows that reveal a readable reward are never claimed here."},
-				{Name: "lifecycle_auto", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Auto disable CN when credits exhausted; re-enable CN after check-in restores credits (default true)."},
-				{Name: "token_keepalive", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Enable daily access-token refresh at 22:00 local time to prevent Keycloak offline-session expiry (default true)."},
-				{Name: "models", Type: pluginapi.ConfigFieldTypeArray, Description: "Optional model list. Each item can have id, name, alias, context, max_tokens, enabled, reasoning."},
-				{Name: "scheduler_mode", Type: pluginapi.ConfigFieldTypeEnum, EnumValues: []string{schedulerModeOff, schedulerModeCredits}, Description: "Multi-account selection: off (defer to built-in, default) or credits (pick highest remaining). WARNING: when off + lifecycle_auto=false, exhausted accounts may still be routed — enable lifecycle_auto or set scheduler_mode=credits."},
-				{Name: "usage_report_url", Type: pluginapi.ConfigFieldTypeString, Description: "Optional override of CPAMP usage import URL (default http://cpa-manager-plus:18317/v0/management/usage/import; also env USAGE_REPORT_URL)."},
-				{Name: "usage_report_key", Type: pluginapi.ConfigFieldTypeString, Description: "Optional CPAMP admin key override. Prefer auto-detect from env CPAMP_ADMIN_KEY / USAGE_REPORT_KEY or secret file /run/secrets/cpamp_admin_key."},
+				{Name: "queue_wait_budget", Type: pluginapi.ConfigFieldTypeString, Description: "单次排队等待上限，0–150 秒，默认 150。填 0 关闭排队。"},
+				{Name: "checkin_auto", Type: pluginapi.ConfigFieldTypeBoolean, Description: "每天自动签到，默认开启。"},
+				{Name: "login_region", Type: pluginapi.ConfigFieldTypeEnum, EnumValues: []string{regionCN, regionIntl}, Description: "新账号登录地区。cn 国内，intl 国际，默认 cn。已有账号不变。"},
+				{Name: "login_dialect", Type: pluginapi.ConfigFieldTypeEnum, EnumValues: []string{loginDialectCockpit, loginDialectDesktop}, Description: "已停用，修改无效。"},
+				{Name: "claim_unverified", Type: pluginapi.ConfigFieldTypeBoolean, Description: "面额无法确认时也领取 Pro 奖励，默认关闭。"},
+				{Name: "lifecycle_auto", Type: pluginapi.ConfigFieldTypeBoolean, Description: "国内账号积分用完自动停用，签到恢复后自动启用，默认开启。"},
+				{Name: "token_keepalive", Type: pluginapi.ConfigFieldTypeBoolean, Description: "每天 22:00 刷新登录状态，默认开启。"},
+				{Name: "models", Type: pluginapi.ConfigFieldTypeArray, Description: "自定义模型列表。每项可含 id、name、alias、context、max_tokens、enabled、reasoning。"},
+				{Name: "scheduler_mode", Type: pluginapi.ConfigFieldTypeEnum, EnumValues: []string{schedulerModeOff, schedulerModeCredits}, Description: "多账号选择。off 用系统默认，credits 选剩余积分最多的账号，默认 off。选 off 且关闭自动停用时，积分用完的账号仍会被分配。"},
+				{Name: "usage_report_url", Type: pluginapi.ConfigFieldTypeString, Description: "用量上报地址，留空使用默认。"},
+				{Name: "usage_report_key", Type: pluginapi.ConfigFieldTypeString, Description: "用量上报密钥，留空自动读取。"},
 			},
 		},
 		Capabilities: registrationCapability{
@@ -615,9 +615,9 @@ func handleExecExecute(raw []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Map CPA-facing model name (e.g. "qoder/qmodel_preview" or "qmodel_preview")
-	// to the upstream key the gateway recognises.
-	upstreamModel := cpaToUpstreamKey(stripProviderPrefix(req.Model))
+	// Map the CPA-facing name onto the catalog key. GLM-5.4 and glm-5.4 are
+	// the same display name. The reply uses that display name in lower case.
+	upstreamModel, replyAlias := resolveChatModel(sa, req.StorageJSON, req.Model)
 	cooldownModel := requestModelForCooldown(req.Model, req.Metadata)
 	started := time.Now()
 	authUID := ""
@@ -681,7 +681,8 @@ func handleExecExecute(raw []byte) ([]byte, error) {
 			// cooldown layer stops re-picking a drained credential.
 			return nil, upstreamStatusError(statusCode, errOut)
 		}
-		completion, err := aggregateQoderSSE(newHostStreamReader(stream), req.Model)
+		observedChatStatus = statusCode
+		completion, err := aggregateQoderSSEAlias(newHostStreamReader(stream), upstreamModel, replyAlias)
 		stream.Close()
 		if err != nil {
 			var fe *qoderFrameError
@@ -732,7 +733,7 @@ func handleExecStream(raw []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	upstreamModel := cpaToUpstreamKey(stripProviderPrefix(req.Model))
+	upstreamModel, replyAlias := resolveChatModel(sa, req.StorageJSON, req.Model)
 	cooldownModel := requestModelForCooldown(req.Model, req.Metadata)
 	started := time.Now()
 	authUID := ""
@@ -760,7 +761,7 @@ func handleExecStream(raw []byte) ([]byte, error) {
 	// No async stream id → fall back to synchronous chunk collection.
 	if req.StreamID == "" {
 		collector := &sseUsageCollector{}
-		chunks, statusCode, errCollect := collectUpstreamStreamCompletions(body, upstreamModel, sa, sseFramed, collector)
+		chunks, statusCode, errCollect := collectUpstreamStreamCompletions(body, upstreamModel, sa, sseFramed, collector, replyAlias)
 		if errCollect != nil {
 			publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, statusCode, errCollect.Error())
 			recordUpstreamFailure(req.AuthID, cooldownModel, statusCode, errCollect.Error())
@@ -776,7 +777,7 @@ func handleExecStream(raw []byte) ([]byte, error) {
 	// Use context.Background() (not nil) so the request can be cancelled when the
 	// client disconnects — otherwise the pump keeps reading a dead upstream until
 	// sharedHTTPClient's 120s timeout, holding a pool slot the whole time.
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(withReplyAlias(context.Background(), replyAlias))
 	// v0.8.64: rebuildQueueRequest re-issues the upstream request for a 10605
 	// queue-ticket retry — the body reader is single-shot and the completions
 	// headers carry per-round request ids, so every round needs a freshly

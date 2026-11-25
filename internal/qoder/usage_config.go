@@ -135,7 +135,7 @@ func configure(raw []byte) error {
 				if v, present := m["queue_wait_budget"]; present {
 					secs, err := strconv.Atoi(configScalarString(v))
 					if err != nil || secs < 0 || secs > 150 {
-						return fmt.Errorf("qoder queue_wait_budget must be an integer from 0 to 150 seconds")
+						return fmt.Errorf("排队等待上限须为 0 到 150 的整数")
 					}
 					nextQueueWaitBudget = time.Duration(secs) * time.Second
 				}

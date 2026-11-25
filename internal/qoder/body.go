@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
 
 //go:embed baseprompt.json
@@ -30,7 +31,7 @@ var basepromptJSON []byte
 // retired keys (performance, qmodel, q36fmodel) are retargeted to their
 // current successors instead of being passed through to a silent auto.
 func cpaToUpstreamKey(cpaModel string) string {
-	switch cpaModel {
+	switch strings.ToLower(strings.TrimSpace(cpaModel)) {
 	case "qoder-auto", "auto":
 		return "auto"
 	case "qoder-ultimate", "ultimate":
@@ -78,7 +79,90 @@ func cpaToUpstreamKey(cpaModel string) string {
 	case "minimax-m3.1-flash", "minimax-m3", "minimax-m2.7", "mmodel":
 		return "mmodel"
 	}
-	return cpaModel
+	return strings.TrimSpace(cpaModel)
+}
+
+// catalogNames is one fetched model list, both directions.
+// The reply name is the display name in lower case: GLM-5.4 and glm-5.4
+// are the same name. Keys missing from this list fall back to the static table,
+// so a retired alias such as glm-5.2 still resolves after the catalog drops it.
+type catalogNames struct {
+	byKey  map[string]string
+	byName map[string]string
+}
+
+func namesFromModels(models []pluginapi.ModelInfo) catalogNames {
+	t := catalogNames{
+		byKey:  make(map[string]string, len(models)),
+		byName: make(map[string]string, len(models)*2),
+	}
+	for _, m := range models {
+		key := strings.TrimSpace(m.ID)
+		if key == "" {
+			continue
+		}
+		alias := strings.ToLower(strings.TrimSpace(m.Name))
+		if alias == "" {
+			alias = strings.ToLower(key)
+		}
+		t.byKey[key] = alias
+		t.byName[alias] = key
+		t.byName[strings.ToLower(key)] = key
+	}
+	return t
+}
+
+func (t catalogNames) upstream(requested string) string {
+	name := strings.ToLower(strings.TrimSpace(requested))
+	if key, ok := t.byName[name]; ok && key != "" {
+		return key
+	}
+	return cpaToUpstreamKey(requested)
+}
+
+func (t catalogNames) alias(upstreamKey string) string {
+	if a, ok := t.byKey[upstreamKey]; ok && a != "" {
+		return a
+	}
+	return cpaAliasForUpstream(upstreamKey)
+}
+
+// cpaAliasForUpstream is the name CPA clients use for a catalog key.
+// The gateway labels chunks "auto". Clients ask for glm-5.4, not gmodel_latest.
+// Tier keys that are already the public name stay themselves. Unknown keys
+// pass through. Retired aliases (glm-5.2, qwen3.7-max) are not written back;
+// the current product name for that catalog key is.
+func cpaAliasForUpstream(upstreamKey string) string {
+	switch upstreamKey {
+	case "gmodel_latest":
+		return "glm-5.4"
+	case "gmodel":
+		return "glm-5.3"
+	case "gfmodel":
+		return "glm-5.3-flash"
+	case "qmodel_latest":
+		return "qwen4-max"
+	case "qmodel_38max":
+		return "qwen3.8-max"
+	case "qfmodel":
+		return "qwen3.8-flash"
+	case "dmodel":
+		return "deepseek-v4-pro"
+	case "dfmodel":
+		return "deepseek-flash"
+	case "kmodel_latest":
+		return "kimi-k3.1-pro"
+	case "kmodel":
+		return "kimi-k2.8-preview"
+	case "mmodel":
+		return "minimax-m3.1-flash"
+	case "smodel":
+		return "sonus"
+	case "cmodel":
+		return "cantus"
+	default:
+		return upstreamKey
+	}
 }
 
 // openAIMessage is one message in the OpenAI chat completion format. The
@@ -430,11 +514,12 @@ func buildQoderBody(req *openAIRequest, modelKey, userType string) ([]byte, erro
 		base["tools"] = mendToolSchemasRaw(req.Tools)
 	}
 
-	// business
+	// business. Desktop puts the catalog key on business.model_key.
 	if biz, ok := base["business"].(map[string]any); ok {
 		biz["id"] = uuid.NewString()
 		biz["begin_at"] = time.Now().UnixMilli()
 		biz["name"] = runeSafePrefix(prompt, 30)
+		biz["model_key"] = modelKey
 	}
 
 	// Reasoning dial: inject upstream thinking parameters only when the client

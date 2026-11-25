@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
 
 // 2026-09-19 upstream alignment (reference: icebears111/qoderwork2api,
@@ -71,6 +73,93 @@ func TestCPAToUpstreamKeyQwen38Flash(t *testing.T) {
 // every alias target must be a key the current catalog still carries. A
 // target outside wbModels() would be sent upstream verbatim and silently
 // rerouted to auto.
+func TestCPAAliasForUpstream(t *testing.T) {
+	cases := map[string]string{
+		"gmodel_latest": "glm-5.4",
+		"gmodel":        "glm-5.3",
+		"gfmodel":       "glm-5.3-flash",
+		"qmodel_latest": "qwen4-max",
+		"qmodel_38max":  "qwen3.8-max",
+		"qfmodel":       "qwen3.8-flash",
+		"dmodel":        "deepseek-v4-pro",
+		"dfmodel":       "deepseek-flash",
+		"kmodel_latest": "kimi-k3.1-pro",
+		"kmodel":        "kimi-k2.8-preview",
+		"mmodel":        "minimax-m3.1-flash",
+		"smodel":        "sonus",
+		"cmodel":        "cantus",
+		"auto":          "auto",
+		"ultimate":      "ultimate",
+		"fast":          "fast",
+		"efficient":     "efficient",
+		"brand-new-key": "brand-new-key",
+	}
+	for key, want := range cases {
+		if got := cpaAliasForUpstream(key); got != want {
+			t.Errorf("cpaAliasForUpstream(%q) = %q, want %q", key, got, want)
+		}
+		if back := cpaToUpstreamKey(want); back != key {
+			t.Errorf("cpaToUpstreamKey(cpaAliasForUpstream(%q)) = %q, want %q", key, back, key)
+		}
+	}
+	// A client may send either name. Both report the alias.
+	for _, in := range []string{"glm-5.4", "gmodel_latest"} {
+		if got := cpaAliasForUpstream(cpaToUpstreamKey(in)); got != "glm-5.4" {
+			t.Errorf("report name for %q = %q, want glm-5.4", in, got)
+		}
+	}
+	// Retired aliases write back the current product name, not themselves.
+	if got := cpaAliasForUpstream(cpaToUpstreamKey("glm-5.2")); got != "glm-5.3" {
+		t.Errorf("glm-5.2 reports %q, want glm-5.3", got)
+	}
+	if got := reportedModel("auto", "gmodel_latest", ""); got != "glm-5.4" {
+		t.Errorf("auto chunk reports %q, want glm-5.4", got)
+	}
+	if got := reportedModel("gmodel_latest", "gmodel_latest", ""); got != "glm-5.4" {
+		t.Errorf("echoed catalog key reports %q, want glm-5.4", got)
+	}
+	if got := reportedModel("other-model", "gmodel_latest", ""); got != "other-model" {
+		t.Errorf("foreign chunk model reports %q, want other-model", got)
+	}
+	if got := cpaToUpstreamKey("GLM-5.4"); got != "gmodel_latest" {
+		t.Errorf("cpaToUpstreamKey(GLM-5.4) = %q, want gmodel_latest", got)
+	}
+}
+
+func TestCatalogNamesUseLowercasedDisplayName(t *testing.T) {
+	names := namesFromModels([]pluginapi.ModelInfo{
+		{ID: "gmodel_latest", Name: "GLM-9.9"},
+		{ID: "brandnew", Name: "Brand-New"},
+	})
+	if got := names.alias("gmodel_latest"); got != "glm-9.9" {
+		t.Errorf("alias = %q, want glm-9.9", got)
+	}
+	if got := names.upstream("GLM-9.9"); got != "gmodel_latest" {
+		t.Errorf("upstream(GLM-9.9) = %q", got)
+	}
+	if got := names.upstream("glm-9.9"); got != "gmodel_latest" {
+		t.Errorf("upstream(glm-9.9) = %q", got)
+	}
+	if got := names.upstream("glm-5.4"); got != "gmodel_latest" {
+		t.Errorf("retired display still maps, got %q", got)
+	}
+	if got := names.alias("gmodel_latest"); got != "glm-9.9" {
+		t.Errorf("live display wins over the static alias, got %q", got)
+	}
+	if got := names.upstream("Brand-New"); got != "brandnew" {
+		t.Errorf("upstream(Brand-New) = %q", got)
+	}
+	if got := names.alias("brandnew"); got != "brand-new" {
+		t.Errorf("alias(brandnew) = %q", got)
+	}
+	if got := names.upstream("glm-5.2"); got != "gmodel" {
+		t.Errorf("glm-5.2 = %q, want gmodel", got)
+	}
+	if got := names.alias("qfmodel"); got != "qwen3.8-flash" {
+		t.Errorf("missing key falls back to static, got %q", got)
+	}
+}
+
 func TestCPAToUpstreamKeyTargetsExistInStaticCatalog(t *testing.T) {
 	known := make(map[string]bool)
 	for _, m := range wbModels() {

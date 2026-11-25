@@ -2,6 +2,10 @@
 
 使用方法见 [README](README.md)。发行包在 [Releases](https://github.com/M1nt-Ch0c0/CLIProxyAPI-Qoder-Plugin/releases)。
 
+## 0.8.83
+
+聊天改为桌面版的签名请求。回复里的模型名取目录显示名并转成小写，例如 `GLM-5.4` 写成 `glm-5.4`。发给上游的仍是目录键。插件设置说明改为中文。
+
 ## 0.8.82
 
 模型目录加回 `?Encode=1`。桌面版 `models.list` 每次都会带这个参数，请求日志只打印路径，所以 0.8.81 把它漏掉了。聊天地址不变。
