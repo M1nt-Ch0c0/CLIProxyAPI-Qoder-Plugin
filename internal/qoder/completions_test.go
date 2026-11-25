@@ -1,9 +1,9 @@
 package qoder
 
-// The executor tests below pin the production chat wire contract: an encoded
-// agent_chat_generation POST, model_config.key, no x-model-key, folded
-// through qoderUnwrapFrame. The completions helpers earlier in this file
-// cover the unused OpenAI-style dialect and are not what the executor sends.
+// The executor tests below pin the production chat wire contract: the request
+// prepareInferRequest emits, model_config.key gmodel_latest, folded through
+// qoderUnwrapFrame. The completions helpers earlier in this file cover the
+// unused OpenAI-style dialect and are not what the executor sends.
 
 import (
 	"encoding/json"
@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -73,11 +74,28 @@ func completionsCaptureServer(t *testing.T, status int, reply string) (*httptest
 	return srv, cap
 }
 
-func stubChatEndpoint(t *testing.T, url string) {
+func stubChatEndpoint(t *testing.T, raw string) {
 	t.Helper()
-	orig := endpointChatFn
-	endpointChatFn = func(*storedAuth) string { return url }
-	t.Cleanup(func() { endpointChatFn = orig })
+	target, err := url.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	origChat := endpointChatFn
+	endpointChatFn = func(*storedAuth) string { return raw }
+	origPrep := prepareInferFn
+	prepareInferFn = func(sa *storedAuth, body []byte, modelKey string) (*http.Request, error) {
+		req, err := origPrep(sa, body, modelKey)
+		if err != nil {
+			return nil, err
+		}
+		req.URL.Scheme = target.Scheme
+		req.URL.Host = target.Host
+		return req, nil
+	}
+	t.Cleanup(func() {
+		endpointChatFn = origChat
+		prepareInferFn = origPrep
+	})
 }
 
 func agentChatURL(base string) string {
@@ -103,11 +121,8 @@ func assertAgentModel(t *testing.T, sent map[string]any, header http.Header) {
 	if mc["key"] != "gmodel_latest" {
 		t.Fatalf("model_config.key = %v, want gmodel_latest", mc["key"])
 	}
-	if got := header.Get("x-model-key"); got != "" {
-		t.Fatalf("x-model-key = %q, capture has no such header", got)
-	}
-	if got := header.Get("x-model-source"); got != "" {
-		t.Fatalf("x-model-source = %q, capture has no such header", got)
+	if got := header.Get("X-Model-Key"); got != "gmodel_latest" {
+		t.Fatalf("X-Model-Key = %q", got)
 	}
 	if !strings.HasPrefix(header.Get("Authorization"), "Bearer COSY.") {
 		t.Fatalf("Authorization = %q, want a COSY bearer", header.Get("Authorization"))
@@ -384,10 +399,14 @@ func TestExecutePostsAgentChatAndFoldsReply(t *testing.T) {
 	}
 
 	method, path, header, body := cap.snapshot()
-	wantPath := "/algo/api/v2/service/pro/sse/agent_chat_generation"
+	wantPath := "/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1"
 	if method != http.MethodPost || path != wantPath {
 		t.Fatalf("must POST agent_chat_generation, got %s %s", method, path)
 	}
+	if strings.Contains(string(body), "glm-5") || strings.Contains(string(body), "GLM-5.4") {
+		t.Fatalf("upstream was asked for a display name: %s", body)
+	}
+	t.Logf("executor posted %s model_header=%s body_has_glm-5=%v", path, header.Get("X-Model-Key"), strings.Contains(string(body), "glm-5"))
 	sent := decodeCapturedAgentBody(t, body)
 	assertAgentModel(t, sent, header)
 	if sent["stream"] != true {
@@ -514,7 +533,7 @@ func TestCollectCompletionsQueueRetryThenSucceeds(t *testing.T) {
 
 	sa := &storedAuth{Auth: storedTokens{AccessToken: "dt-test-token", Region: "intl"}}
 	collector := &sseUsageCollector{}
-	chunks, statusCode, err := collectUpstreamStreamCompletions("encoded-body", "gmodel_latest", sa, false, collector)
+	chunks, statusCode, err := collectUpstreamStreamCompletions([]byte(`{"model_config":{"key":"gmodel_latest"}}`), "gmodel_latest", sa, false, collector)
 	if err != nil || statusCode != 0 {
 		t.Fatalf("the retried round must succeed: status=%d err=%v", statusCode, err)
 	}
@@ -543,7 +562,7 @@ func TestCollectCompletionsGuards(t *testing.T) {
 	for _, tc := range cases {
 		srv, _ := completionsCaptureServer(t, http.StatusOK, tc.reply)
 		stubChatEndpoint(t, srv.URL)
-		_, _, err := collectUpstreamStreamCompletions("encoded-body", "gmodel_latest", sa, false, nil)
+		_, _, err := collectUpstreamStreamCompletions([]byte(`{"model_config":{"key":"gmodel_latest"}}`), "gmodel_latest", sa, false, nil)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: want error containing %q, got %v", tc.name, tc.want, err)
 		}

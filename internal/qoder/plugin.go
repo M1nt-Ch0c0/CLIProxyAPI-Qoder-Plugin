@@ -634,7 +634,6 @@ func handleExecExecute(raw []byte) ([]byte, error) {
 		publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, 0, "body build: "+err.Error())
 		return nil, fmt.Errorf("body build: %w", err)
 	}
-	encodedBody := qoderEncode(body)
 	// v0.8.64: honour the 10605 RESOURCE_LIMIT queue ticket — wait
 	// retryAfterSeconds and re-issue the request, bounded by
 	// queueRetryAllowed (see queue_retry.go). The ticket can arrive as the
@@ -643,11 +642,8 @@ func handleExecExecute(raw []byte) ([]byte, error) {
 	// invisible to the caller.
 	var queueWaited time.Duration
 	for attempt := 0; ; attempt++ {
-		httpReq, err := http.NewRequest(http.MethodPost, endpointChatFn(sa), strings.NewReader(encodedBody))
+		httpReq, err := prepareInferFn(sa, body, upstreamModel)
 		if err != nil {
-			return nil, err
-		}
-		if err := applyCosyHeaders(httpReq, sa, encodedBody, endpointChatFn(sa), upstreamModel, true); err != nil {
 			publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, 0, err.Error())
 			return nil, err
 		}
@@ -758,15 +754,13 @@ func handleExecStream(raw []byte) ([]byte, error) {
 		publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, 0, "body build: "+err.Error())
 		return nil, fmt.Errorf("body build: %w", err)
 	}
-	encodedBody := qoderEncode(body)
-
 	headers := streamHeaders()
 	sseFramed := clientNeedsSSEFrame(req.Metadata)
 
 	// No async stream id → fall back to synchronous chunk collection.
 	if req.StreamID == "" {
 		collector := &sseUsageCollector{}
-		chunks, statusCode, errCollect := collectUpstreamStreamCompletions(encodedBody, upstreamModel, sa, sseFramed, collector)
+		chunks, statusCode, errCollect := collectUpstreamStreamCompletions(body, upstreamModel, sa, sseFramed, collector)
 		if errCollect != nil {
 			publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, statusCode, errCollect.Error())
 			recordUpstreamFailure(req.AuthID, cooldownModel, statusCode, errCollect.Error())
@@ -788,28 +782,21 @@ func handleExecStream(raw []byte) ([]byte, error) {
 	// headers carry per-round request ids, so every round needs a freshly
 	// minted request.
 	rebuildQueueRequest := func() (*http.Request, error) {
-		retryReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointChatFn(sa), strings.NewReader(encodedBody))
+		retryReq, err := prepareInferFn(sa, body, upstreamModel)
 		if err != nil {
 			return nil, err
 		}
-		if err := applyCosyHeaders(retryReq, sa, encodedBody, endpointChatFn(sa), upstreamModel, true); err != nil {
-			return nil, err
-		}
+		retryReq = retryReq.WithContext(ctx)
 		return retryReq, nil
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointChatFn(sa), strings.NewReader(encodedBody))
+	httpReq, err := prepareInferFn(sa, body, upstreamModel)
 	if err != nil {
 		cancel()
 		streamEmitError(req.StreamID, err.Error())
 		streamClose(req.StreamID)
 		return okEnvelope(streamResponse{Headers: headers})
 	}
-	if err := applyCosyHeaders(httpReq, sa, encodedBody, endpointChatFn(sa), upstreamModel, true); err != nil {
-		cancel()
-		streamEmitError(req.StreamID, err.Error())
-		streamClose(req.StreamID)
-		return okEnvelope(streamResponse{Headers: headers})
-	}
+	httpReq = httpReq.WithContext(ctx)
 	// v0.12.85 opt-in stream head gate (config `stream_head_timeout`, seconds).
 	// The pump reads the opening frames while the hand-off waits for its
 	// verdict, so a failure that lands before the model starts answering still

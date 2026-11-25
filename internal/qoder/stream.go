@@ -500,7 +500,7 @@ func pumpUpstreamStream(httpReq *http.Request, rebuild func() (*http.Request, er
 					sawFinish = true
 				}
 				collector.feed(bodyStr)
-				cleaned := cleanChunkJSON(bodyStr)
+				cleaned := labelCatalogModel(cleanChunkJSON(bodyStr), upstreamModel)
 				if cleaned == "" {
 					continue
 				}
@@ -613,15 +613,12 @@ func pumpUpstreamStream(httpReq *http.Request, rebuild func() (*http.Request, er
 // re-issue (the loop below), bounded by queueRetryAllowed. The synchronous
 // path has no request context, so the wait is unconditional; nothing was
 // collected yet on a ticket round, which makes the restart safe.
-func collectUpstreamStreamCompletions(encodedBody, modelKey string, sa *storedAuth, sseFramed bool, collector *sseUsageCollector) ([]pluginapi.ExecutorStreamChunk, int, error) {
+func collectUpstreamStreamCompletions(plainBody []byte, modelKey string, sa *storedAuth, sseFramed bool, collector *sseUsageCollector) ([]pluginapi.ExecutorStreamChunk, int, error) {
 	var waited time.Duration
 	attempt := 0
 	for {
-		httpReq, err := http.NewRequest(http.MethodPost, endpointChatFn(sa), strings.NewReader(encodedBody))
+		httpReq, err := prepareInferFn(sa, plainBody, modelKey)
 		if err != nil {
-			return nil, 0, err
-		}
-		if err := applyCosyHeaders(httpReq, sa, encodedBody, endpointChatFn(sa), modelKey, true); err != nil {
 			return nil, 0, err
 		}
 		stream, statusCode, _, err := hostHTTPDoStream(httpReq)
@@ -967,7 +964,7 @@ func aggregateCompletion(r io.Reader, model string) ([]byte, error) {
 		"id":      firstNonEmpty(respID, "chatcmpl-qoderwork"),
 		"object":  "chat.completion",
 		"created": created,
-		"model":   firstNonEmpty(respModel, model),
+		"model":   firstNonEmpty(catalogModel(respModel, model), model),
 		"choices": []map[string]any{{
 			"index":         0,
 			"message":       message,
@@ -1287,6 +1284,23 @@ func pricingURLFromMessage(message string) string {
 		}
 	}
 	return ""
+}
+
+// catalogModel drops the gateway's generic "auto" label so the fold reports
+// the catalog key that was prepared for the request. The gateway writes
+// "auto" on every successful agent chat even when the key changed the reply.
+func catalogModel(got, requested string) string {
+	if got == "" || (got == "auto" && requested != "" && requested != "auto") {
+		return ""
+	}
+	return got
+}
+
+func labelCatalogModel(chunk, key string) string {
+	if key == "" || key == "auto" || !strings.Contains(chunk, `"model":"auto"`) {
+		return chunk
+	}
+	return strings.ReplaceAll(chunk, `"model":"auto"`, `"model":"`+key+`"`)
 }
 
 func firstNonEmpty(vals ...string) string {

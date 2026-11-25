@@ -12,90 +12,77 @@
 //
 // Run:
 //
-//	QD_TOKEN=dt-... [QD_REGION=cn|intl] [QD_CHAT_MODEL=glm-5.4] go test -tags live -run TestLiveAgentChat -v .
+//	QD_TOKEN=dt-... [QD_REGION=cn|intl] [QD_CHAT_MODEL=gmodel_latest] go test -tags live -run TestLiveAgentChat -v .
 //
 // Skipped unless -tags live AND QD_TOKEN are set, so normal CI stays hermetic.
 package qoder
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
-	"net/http"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
 
 func TestLiveAgentChat(t *testing.T) {
 	sa := liveSA(t)
 	requested := strings.TrimSpace(os.Getenv("QD_CHAT_MODEL"))
 	if requested == "" {
-		requested = "qfmodel"
+		requested = "gmodel_latest"
 	}
 	upstream := cpaToUpstreamKey(stripProviderPrefix(requested))
-	endpoint := endpointChatFor(sa)
-	t.Logf("=== live agent chat, region=%s endpoint=%s model=%s→%s ===", authRegion(sa), endpoint, requested, upstream)
-
-	qwReq := &openAIRequest{}
-	if err := json.Unmarshal([]byte(`{"messages":[{"role":"user","content":"hi"}]}`), qwReq); err != nil {
-		t.Fatal(err)
-	}
-	body, err := buildQoderBody(qwReq, upstream, uiUserType(nil))
-	if err != nil {
-		t.Fatalf("buildQoderBody: %v", err)
-	}
-	encoded := qoderEncode(body)
-	req, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(encoded))
+	t.Logf("=== live agent chat via executor, region=%s model=%s→%s ===", authRegion(sa), requested, upstream)
+	storage, err := json.Marshal(sa)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := applyCosyHeaders(req, sa, encoded, endpoint, upstream, true); err != nil {
+	raw, err := json.Marshal(pluginapi.ExecutorRequest{
+		Model:       requested,
+		Payload:     []byte(`{"messages":[{"role":"user","content":"hi"}]}`),
+		StorageJSON: storage,
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-
 	start := time.Now()
-	resp, err := liveChatClient().Do(req)
+	out, err := handleExecExecute(raw)
 	if err != nil {
-		t.Fatalf("transport: %v (after %s)", err, time.Since(start).Truncate(time.Millisecond))
+		t.Fatalf("execute: %v (after %s)", err, time.Since(start).Truncate(time.Millisecond))
 	}
-	defer resp.Body.Close()
-	t.Logf("[agent] http %d after %s, content-type=%s", resp.StatusCode,
-		time.Since(start).Truncate(time.Millisecond), resp.Header.Get("Content-Type"))
-	var buf bytes.Buffer
-	br := bufio.NewReaderSize(resp.Body, 64<<10)
-	for {
-		if buf.Len() >= 16384 {
-			t.Logf("[agent] stop: limit reached (%d bytes)", buf.Len())
-			break
-		}
-		chunk, err := br.ReadBytes('\n')
-		if len(chunk) > 0 {
-			buf.Write(chunk)
-			line := strings.TrimSpace(string(chunk))
-			if line != "" && (buf.Len() < 2048 || bytes.HasPrefix(chunk, []byte("data:"))) {
-				t.Logf("[agent] +%s %s", time.Since(start).Truncate(time.Millisecond), truncateRedacted(line, 160))
-			}
-		}
-		if err != nil {
-			t.Logf("[agent] stream ended +%s: %v (total %d bytes)", time.Since(start).Truncate(time.Millisecond), err, buf.Len())
-			break
-		}
+	var env envelope
+	if err := json.Unmarshal(out, &env); err != nil || !env.OK {
+		t.Fatalf("envelope: %s err=%v", out, err)
 	}
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200 from agent_chat_generation, got %d: %s", resp.StatusCode, truncateRedacted(buf.String(), 300))
-	}
-	completion, err := aggregateQoderSSE(strings.NewReader(buf.String()), requested)
-	if err != nil {
-		t.Fatalf("fold: %v (head=%s)", err, truncateRedacted(buf.String(), 300))
+	var resp pluginapi.ExecutorResponse
+	if err := json.Unmarshal(env.Result, &resp); err != nil {
+		t.Fatal(err)
 	}
 	var folded map[string]any
-	if err := json.Unmarshal(completion, &folded); err != nil {
+	if err := json.Unmarshal(resp.Payload, &folded); err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("[agent] folded model=%v finish=%v", folded["model"], folded["choices"])
-	if folded["model"] == "" || folded["model"] == "auto" {
-		t.Fatalf("the reply model must name the requested model, got %v", folded["model"])
+	msg, _ := folded["choices"].([]any)
+	text := ""
+	if len(msg) > 0 {
+		choice, _ := msg[0].(map[string]any)
+		message, _ := choice["message"].(map[string]any)
+		text, _ = message["content"].(string)
+		if text == "" {
+			text, _ = message["reasoning_content"].(string)
+		}
+	}
+	t.Logf("[agent] http 200 after %s folded model=%v text_len=%d", time.Since(start).Truncate(time.Millisecond), folded["model"], len(text))
+	if folded["model"] != upstream {
+		t.Fatalf("folded model = %v, want %s", folded["model"], upstream)
+	}
+	if strings.TrimSpace(text) == "" {
+		t.Fatal("assistant text is empty")
+	}
+	if bytes.Contains(resp.Payload, []byte("event:error")) || bytes.Contains(resp.Payload, []byte("JsonParser")) {
+		t.Fatalf("upstream error in payload: %s", truncateRedacted(string(resp.Payload), 200))
 	}
 }
