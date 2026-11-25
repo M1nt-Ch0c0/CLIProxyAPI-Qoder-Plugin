@@ -304,6 +304,31 @@ func TestAggregateCompletionsSSEGuards(t *testing.T) {
 	}
 }
 
+// TestEndpointChatForDesktopCapture pins the chat URL the desktop app POSTs.
+// Qoder 0.5.18 intl log: POST https://api3.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation
+// returned 200. The model rides model_config.key (asserted on the executor
+// below); the query string is this plugin's encoded-body contract.
+func TestEndpointChatForDesktopCapture(t *testing.T) {
+	const path = "/algo/api/v2/service/pro/sse/agent_chat_generation"
+	cases := []struct {
+		region string
+		host   string
+	}{
+		{"intl", "api3.qoder.sh"},
+		{"cn", "gateway.qoder.com.cn"},
+	}
+	for _, c := range cases {
+		raw := endpointChatFor(&storedAuth{Auth: storedTokens{Region: c.region}})
+		req, err := http.NewRequest(http.MethodPost, raw, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if req.URL.Host != c.host || req.URL.Path != path {
+			t.Errorf("region %s chat = %s %s", c.region, req.URL.Host, req.URL.Path)
+		}
+	}
+}
+
 // --- executor: production chat posts agent_chat_generation -------------------
 
 func TestQoderEncodeRoundTrip(t *testing.T) {

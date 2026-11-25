@@ -55,12 +55,11 @@ const (
 	// app.asar) — the 领取Pro flow rides the campaigns channel now
 	// (checkin.go claimProViaCampaigns).
 
-	// Inference endpoints (COSY-signed + QoderEncoding body). The catalog
-	// lives on the inference host WITHOUT the /algo prefix (client worker:
-	// GET {inference}/api/v2/model/list?Encode=1); chat keeps the gateway
-	// /algo dialect.
+	// Inference endpoints (COSY-signed + QoderEncoding body). Desktop Qoder
+	// 0.5.18 GETs the catalog at {inference}/algo/api/v2/model/list and POSTs
+	// chat at {inference}/algo/api/v2/service/pro/sse/agent_chat_generation.
 	endpointChat   = gatewayBaseCN + "/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1"
-	endpointModels = gatewayBaseCN + "/api/v2/model/list?Encode=1"
+	endpointModels = gatewayBaseCN + "/algo/api/v2/model/list?Encode=1"
 
 	// loginTTL bounds one device-authorization flow. Users may need to log in
 	// to qoder.com.cn first (Aliyun SSO) before authorizing — give them room.
@@ -211,7 +210,7 @@ type registrationCapability struct {
 // version is the plugin's reported version. The c-shared shell owns the
 // ldflags target (-X main.version, kept in lockstep with the VERSION file)
 // and copies it in via SetBuild. This literal is the fallback for tests.
-var version = "0.8.79"
+var version = "0.8.80"
 
 // providerName is the registered plugin id. The unified default is "qoder";
 // split-channel builds rename it with -X main.providerName=qoder-intl, which

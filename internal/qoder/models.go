@@ -23,7 +23,7 @@ import (
 // advertised keys the gateway no longer knows (performance, qmodel,
 // q36fmodel) — requesting one silently routed to auto. Only keys present in
 // the current catalog are registered here; dynamic refresh via the inference
-// host's /api/v2/model/list replaces this at runtime when an account is
+// host's /algo/api/v2/model/list replaces this at runtime when an account is
 // present. Aliases use the qoder/ prefix in AuthAttributes; bare IDs work
 // too.
 func wbModels() []pluginapi.ModelInfo {
@@ -226,9 +226,9 @@ func filterCoolingModels(sa *storedAuth, models []pluginapi.ModelInfo) []plugina
 // for_auth chain without the network. Production always uses callModelsAPI.
 var callModelsAPIFn = callModelsAPI
 
-// callModelsAPI GETs /api/v2/model/list?Encode=1 from the account's inference
-// host with COSY signing (same as inference). Returns plain JSON (not
-// QoderEncoding). Falls back to wbModels() on any error.
+// callModelsAPI GETs /algo/api/v2/model/list?Encode=1 from the account's
+// inference host with COSY signing (same as inference). Returns plain JSON
+// (not QoderEncoding). Falls back to wbModels() on any error.
 func callModelsAPI(sa *storedAuth) ([]pluginapi.ModelInfo, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

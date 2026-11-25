@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-// newModelsProbeRequest builds the GET /api/v2/model/list?Encode=1 request
+// newModelsProbeRequest builds the GET /algo/api/v2/model/list?Encode=1 request
 // (inference host, no /algo prefix) with the same Cosy signing as production
 // (copy of callModelsAPI's first half).
 // The context stays alive for the caller's request lifetime (no premature

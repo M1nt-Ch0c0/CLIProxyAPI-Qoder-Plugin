@@ -134,10 +134,10 @@ func endpointChatFor(sa *storedAuth) string {
 var endpointChatFn = endpointChatFor
 
 // inferenceBaseForRegion returns the inference host base for a region. The
-// model catalog is served by the inference host at /api/v2/model/list (no
-// /algo prefix) — the same per-region host the chat gateway rides. Which
-// specific inference node a desktop client elects (api1/api2/api3 on Intl)
-// is that machine's election result, not a plugin constant.
+// model catalog is GET {host}/algo/api/v2/model/list on that same host
+// (desktop Qoder 0.5.18, intl elected api3, status 200). Which specific
+// inference node a desktop client elects (api1/api2/api3 on Intl) is that
+// machine's election result, not a plugin constant.
 func inferenceBaseForRegion(region string) string {
 	return gatewayBaseForRegion(region)
 }
@@ -162,7 +162,7 @@ func inferenceBaseFor(sa *storedAuth) string {
 }
 
 func endpointModelsFor(sa *storedAuth) string {
-	return inferenceBaseFor(sa) + "/api/v2/model/list?Encode=1"
+	return inferenceBaseFor(sa) + "/algo/api/v2/model/list?Encode=1"
 }
 
 // Login-region config accessors (parsed from login_region in configure()).

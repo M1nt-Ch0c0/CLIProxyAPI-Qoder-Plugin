@@ -2,6 +2,10 @@
 
 使用方法见 [README](README.md)。发行包在 [Releases](https://github.com/M1nt-Ch0c0/CLIProxyAPI-Qoder-Plugin/releases)。
 
+## 0.8.80
+
+模型目录改回桌面版正在用的 `GET /algo/api/v2/model/list`。0.8.74 去掉 `/algo` 之后这个地址是空 404，目录会悄悄退回写死的表。聊天仍是 `POST /algo/api/v2/service/pro/sse/agent_chat_generation`。
+
 ## 0.8.79
 
 聊天改回 `agent_chat_generation`。`/qsvr/chat/completions` 在登录之后返回空的 404，那个地址不是聊天接口。国际版仍走 `api3.qoder.sh`，国内版仍走 `gateway.qoder.com.cn`。

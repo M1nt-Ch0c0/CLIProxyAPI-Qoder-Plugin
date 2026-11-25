@@ -161,16 +161,17 @@ func TestParseModelsCatalogNoUsableScene(t *testing.T) {
 	}
 }
 
-// TestEndpointModelsForInferencePath — the catalog rides the account's
-// inference host at /api/v2/model/list?Encode=1, WITHOUT the /algo prefix
-// (the gateway /algo path is the chat dialect, not the catalog dialect).
+// TestEndpointModelsForInferencePath pins the catalog URL the desktop app
+// actually GETs: {inference host}/algo/api/v2/model/list (Qoder 0.5.18 intl
+// log, status 200). Encode=1 stays because this plugin still sends the
+// COSY-signed QoderEncoding body.
 func TestEndpointModelsForInferencePath(t *testing.T) {
 	cases := []struct {
 		region string
 		want   string
 	}{
-		{"intl", "https://api3.qoder.sh/api/v2/model/list?Encode=1"},
-		{"cn", "https://gateway.qoder.com.cn/api/v2/model/list?Encode=1"},
+		{"intl", "https://api3.qoder.sh/algo/api/v2/model/list?Encode=1"},
+		{"cn", "https://gateway.qoder.com.cn/algo/api/v2/model/list?Encode=1"},
 	}
 	for _, c := range cases {
 		sa := &storedAuth{Auth: storedTokens{AccessToken: "tok", Region: c.region}}
@@ -178,8 +179,12 @@ func TestEndpointModelsForInferencePath(t *testing.T) {
 		if got != c.want {
 			t.Errorf("endpointModelsFor(%s) = %q, want %q", c.region, got, c.want)
 		}
-		if strings.Contains(got, "/algo/") {
-			t.Errorf("catalog URL must not carry the /algo prefix: %q", got)
+		req, err := http.NewRequest(http.MethodGet, got, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if req.Method != http.MethodGet || req.URL.Path != "/algo/api/v2/model/list" {
+			t.Errorf("catalog request = %s %s", req.Method, req.URL.RequestURI())
 		}
 	}
 }
