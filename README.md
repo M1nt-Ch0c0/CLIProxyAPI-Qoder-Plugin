@@ -1,82 +1,34 @@
-# qoder
+# Qoder
 
-A [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) provider plugin for the Qoder family. CN and Intl share one plugin and one default identifier, `qoder`. Each auth file records its own region. `login_region` applies only to new logins: `cn` (default) uses `https://qoder.cn`, `intl` uses `https://qoder.com`. Legacy `qoder-cn-<uid>.json` and `qoder-intl-<uid>.json` files are adopted on startup.
+把 Qoder 账号接到 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)。登录用的是 Qoder 自己的 OAuth，不是 API Key。登完之后，用 CPA 的接口调用这个账号能用的模型。
 
-This repository is the Qoder plugin by itself. Names `qoder-cn` and `qoder-intl` are split-channel ids. A split build can still register under those ids (`-X main.providerName=qoder-cn` or `qoder-intl`). Install that package in place of the unified plugin.
+国内账号走 [qoder.cn](https://qoder.cn)，国际账号走 [qoder.com](https://qoder.com)。一个插件 ID：`qoder`。每个凭证自己记地区，`login_region` 只决定接下来新登录去哪个站。
 
-Built with Go (CGO, c-shared). The component version is `VERSION` (0.8.76 in this tree). `make` injects `git describe --tags --always --dirty`, so a local binary can report a tag plus a commit distance instead of the VERSION file. A hand stamp such as `0.8.87-local.<sha>` is that kind of local build, not the VERSION file.
+## 安装
 
-CN API hosts are `openapi.qoder.com.cn` and `gateway.qoder.com.cn`. The older qoderwork IDE host `qoder.com.cn` is the login domain this plugin stopped using at component 0.8.45.
+用管理面板里的插件市场。
 
-## Credits
+1. 打开 CLIProxyAPI 管理面板，进入插件市场，安装 **Qoder** 并启用。
+2. 插件配置里把 `login_region` 设成 `cn` 或 `intl`。不写的话新登录按国内站。
+3. 在凭证页添加 Qoder。页面会打开浏览器，按 Qoder 的 OAuth 授权。授权完成，凭证出现在列表里。
 
-`GET {billing}/api/v2/quota/usage` is folded by `summarizeQuotaResponse` in `billing.go`. The pools are `userQuota`, `addOnQuota`, `dedicatedResourcePackages`, and `orgResourcePackage` when the response includes it.
-
-| Field | Meaning |
-| --- | --- |
-| `total_remain` | Sum of each pool's `remaining`. Credits that can still be spent. |
-| `total_used` | Sum of each pool's `used`. Spend in the current cycle. |
-| `total_size` | Sum of each pool's `total`. |
-| `packages` | Always includes 基础额度 and 赠送/签到额度, then each dedicated package, then the org shared pool. |
-| `fetched_at` | When this snapshot was taken. Billing can lag for minutes after a chat; compare this timestamp when the numbers look frozen. |
-
-A pool can report `remaining` with `total` 0. Those zeros add into `total_size`, so a snapshot can be `total_remain` 6000, `total_used` 0, `total_size` 0. `displayNote` in `policy.go` writes `余6000 已用0` in that case. It appends `池S` only when `total_size > 0`.
-
-`GET /plugins/qoder/credits` returns these absolute numbers. `POST /plugins/qoder/refresh` refreshes the cache. There is no management route that returns a percentage window, and this plugin does not implement the host QuotaProvider.
-
-A manager account list that draws only percentage windows therefore has no window to draw. That list shows an empty quota (the CPAMP label is 「暂无额度数据」) while the plugin panel still refreshes and shows `total_remain`. A monthly bar synthesized from a hand-set cap is manager UI outside `plugins/qoder`.
-
-Exhausted means `total_remain` is 0 and the snapshot carries a usage signal: `total_used > 0`, `total_size > 0`, or a non-empty `packages` list (`isCreditsExhausted`). A missing snapshot, or all zeros with no packages, stays `积分未知`. `summarizeQuotaResponse` always emits the two base package rows, so a successful all-zero quota response counts as exhausted.
-
-### What the plugin panel draws
-
-`panel.html` is a second view of the same snapshot.
-
-- `fmtRemain` labels `总` as `total_remain + total_used` on every card.
-- The per-account progress bar uses `total_size` when it is greater than 0, and otherwise uses `remain + used` (`progressHTML`).
-- The summary 额度池 and 消耗占比 do the same fallback on the summed figures. With remain 6000, used 0, size 0, 消耗占比 renders as 0% of a pool of 6000.
-- `summarizeCredits` in `panel.go` sets its `total` to the larger of `remain + used` and `total_size`.
-
-That filled-in pool is display math inside the page. The auth-file note does not use it. A card can read `余 6000 已用 0` while the panel's 额度池 reads 6000.
-
-## plan_gate (code 112)
-
-The chat gateway rejects some (account, model) pairs with business code `112`. `planGateLine` renders:
-
-```text
-plan_gate: code=112 套餐额度或模型范围限制（同账号其他模型通常不受影响）
-```
-
-`recordUpstreamFailure` cools that pair. The account stays selectable, and the credits snapshot stays at the last fetch. `gateway_plan_gate_test.go` keeps this copy out of the hard-credit class and out of the 429 soft rate-limit class.
-
-A host that badges an account from its last proxied request can leave a failure mark in place after credits have refreshed. Refreshing credits does not rewrite that request record. Code 112 with a positive `total_remain` is the normal shape of this rejection: the sentence names 套餐额度 or 模型范围 for the model that was called, and other models on the same account keep working.
-
-Active pair cooldowns are listed at `GET /plugins/qoder/cooldowns` and cleared with `POST /plugins/qoder/cooldowns/clear`.
-
-## Check-in
-
-Both regions claim through the campaigns API. The legacy CN `daily-check-in/claim` endpoint answers 409 and grants nothing; the plugin does not call it. Auto check-in runs at 10:05 Asia/Shanghai, plus local 10:00, 15:00, and 21:00 (`checkin_auto`, default true).
-
-## Queue wait budget
-
-Set `plugins.configs.qoder.queue_wait_budget` to limit the cumulative time spent waiting on upstream `10605` / `RESOURCE_LIMIT` queue tickets:
+然后用 CPA 的地址和密钥请求。模型名用插件列出来的 ID。
 
 ```yaml
 plugins:
+  enabled: true
   configs:
     qoder:
       enabled: true
-      queue_wait_budget: 30
+      login_region: cn   # 国际账号写 intl
 ```
 
-The value is an integer from 0 to 150 seconds. Omitting it preserves the existing 150-second budget; `0` disables queue retries. The existing maximum of three retries and 45-second per-wait cap still apply. With 30-second tickets, a budget of 30 permits one retry, while a 45-second ticket cannot fit and fails immediately.
+`plugins.enabled` 要开着，市场装上去的插件才会加载。
 
-This limits queue-ticket waits per plugin execution, not network or generation time or retries performed by the host. A shorter budget returns an explicit queue error sooner but may give up on requests that would succeed after a longer wait.
+## 自己放文件
 
-## License
+市场不可用时，从 [Releases](https://github.com/M1nt-Ch0c0/CLIProxyAPI-Qoder-Plugin/releases) 下载和机器系统匹配的包，把里面的插件文件放到 CPA 的 `plugins` 目录，重启。配置同上。
 
-MIT — see [LICENSE](LICENSE).
+## 许可
 
-## Disclaimer
-
-The code originates from the upstream reference repository and is provided for mirroring purposes only.
+MIT，见 [LICENSE](LICENSE)。
