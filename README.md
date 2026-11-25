@@ -5,7 +5,7 @@
 ## 安装
 
 在 CLIProxyAPI 管理面板的插件市场配置中添加该仓库的json<br/>
-`https://raw.githubusercontent.com/M1nt-Ch0c0/CLIProxyAPI-Qoder-Plugin/refs/heads/main/registry.json` <br/>
+`https://raw.githubusercontent.com/M1nt-Ch0c0/CLIProxyAPI-Qoder-Plugin/main/registry.json`
 刷新后找到 Qoder 并安装。
 
 插件市场打不开的时候，可以从 [Releases](https://github.com/M1nt-Ch0c0/CLIProxyAPI-Qoder-Plugin/releases) 下载和当前系统匹配的包，把里面的插件文件放到 CPA 的 `plugins` 目录
